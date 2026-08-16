@@ -12,6 +12,7 @@ from qdrant_client.http.exceptions import UnexpectedResponse
 from app.core.config import Settings
 from app.core.exceptions import QdrantConnectionError, VectorStoreError
 from app.core.logging import get_logger
+from app.utils.ids import normalize_point_id
 from app.vector_store.base import SearchResult, VectorRecord, VectorStore
 from app.vector_store.filters import PayloadFilter
 
@@ -164,7 +165,7 @@ class QdrantVectorStore(VectorStore):
 
         points = [
             qmodels.PointStruct(
-                id=_normalize_point_id(record.id),
+                id=normalize_point_id(record.id),
                 vector=record.vector,
                 payload=record.payload,
             )
@@ -252,7 +253,7 @@ class QdrantVectorStore(VectorStore):
         if not ids:
             return
 
-        point_ids: list[Any] = [_normalize_point_id(point_id) for point_id in ids]
+        point_ids: list[Any] = [normalize_point_id(point_id) for point_id in ids]
         try:
             self._client.delete(
                 collection_name=collection_name,
@@ -411,18 +412,6 @@ def build_qdrant_filter(payload_filter: PayloadFilter | None) -> qmodels.Filter 
             )
         )
     return qmodels.Filter(must=must_conditions)
-
-
-def _normalize_point_id(point_id: str | UUID) -> str | int:
-    """Qdrant accepts UUID strings or unsigned integers as point IDs."""
-    if isinstance(point_id, UUID):
-        return str(point_id)
-    if isinstance(point_id, str):
-        # Prefer UUID strings; allow numeric string IDs.
-        if point_id.isdigit():
-            return int(point_id)
-        return point_id
-    return point_id
 
 
 def _is_connection_error(exc: Exception) -> bool:

@@ -10,6 +10,7 @@ import pytest
 from app.core.exceptions import QdrantConnectionError, VectorStoreError
 from app.vector_store.base import VectorRecord
 from app.vector_store.filters import PayloadFilter
+from app.utils.ids import normalize_point_id
 from app.vector_store.qdrant import QdrantVectorStore
 from tests.conftest import make_settings
 
@@ -114,6 +115,29 @@ def test_connection_error_on_search(
     mock_client.query_points.side_effect = ConnectionError("connection refused")
     with pytest.raises(QdrantConnectionError):
         store.search("docs", [0.1])
+
+
+def test_normalize_point_id_accepts_chunk_ids() -> None:
+    chunk_id = "fa5eedf3-0802-4bff-b144-a17538dc0533:00001"
+    normalized = normalize_point_id(chunk_id)
+    assert isinstance(normalized, str)
+    assert normalized != chunk_id
+    assert normalize_point_id(chunk_id) == normalized
+
+
+def test_normalize_point_id_preserves_uuid_and_numeric_ids() -> None:
+    document_id = str(uuid4())
+    assert normalize_point_id(document_id) == document_id
+    assert normalize_point_id("42") == 42
+
+
+def test_add_vectors_normalizes_chunk_ids(store: QdrantVectorStore, mock_client: MagicMock) -> None:
+    chunk_id = "doc-1:00001"
+    record = VectorRecord(id=chunk_id, vector=[0.1, 0.2], payload={"k": "v"})
+    store.add_vectors("docs", [record])
+    point = mock_client.upsert.call_args.kwargs["points"][0]
+    assert str(point.id) != chunk_id
+    assert normalize_point_id(chunk_id) == str(point.id)
 
 
 def test_vector_store_implements_interface() -> None:

@@ -1,0 +1,39 @@
+# Secrets and local env (injected at runtime via compose env_file)
+.env
+.env.*
+!.env.example
+
+# Git and IDE
+.git
+.gitignore
+.idea
+.vscode
+
+# Python build / test artifacts
+.venv
+venv
+__pycache__
+*.py[cod]
+*.egg-info
+.pytest_cache
+.mypy_cache
+.ruff_cache
+.coverage
+htmlcov
+dist
+build
+
+# Local runtime data (use named volumes in compose)
+qdrant_storage
+keyword_index
+snapshots
+.tools
+
+# Tests and dev-only files
+tests
+
+# OS / misc
+.DS_Store
+*.log
+*.pem
+*.key

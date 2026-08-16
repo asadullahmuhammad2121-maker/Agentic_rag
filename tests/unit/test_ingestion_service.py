@@ -83,6 +83,7 @@ def test_ingest_valid_pdf_chunks_and_embeds(
     assert isinstance(records[0], VectorRecord)
     assert records[0].payload["page_number"] == 1
     assert "chunk_index" in records[0].payload
+    assert "chunk_id" in records[0].payload
     assert records[0].payload["embedding_status"] == "ready"
     assert len(records[0].vector) == 8
 
@@ -103,11 +104,15 @@ def test_ingest_preserves_metadata(
     assert payload["document_id"] == result.document_id
     assert payload["filename"] == "meta.pdf"
     assert payload["content_type"] == "application/pdf"
+    assert payload["file_type"] == "pdf"
+    assert payload["source"] == "meta.pdf"
     assert payload["file_size"] == result.file_size
     assert payload["checksum"] == result.checksum
     assert payload["page_number"] == 1
     assert payload["page_count"] == 1
     assert payload["chunk_index"] == 0
+    assert payload["chunk_id"] == f"{result.document_id}:00000"
+    assert payload["chunking_strategy"] == "fixed"
     assert payload["embedding_status"] == "ready"
     assert payload["embedding_provider"] == "huggingface"
 
@@ -156,11 +161,11 @@ def test_ingest_embedding_failure_propagates(
 def test_ingest_rejects_invalid_extension(service: DocumentIngestionService) -> None:
     with pytest.raises(InvalidDocumentError) as exc_info:
         service.ingest_pdf(
-            filename="notes.txt",
+            filename="notes.zip",
             content=b"hello",
-            content_type="text/plain",
+            content_type="application/zip",
         )
-    assert exc_info.value.details.get("reason") == "invalid_extension"
+    assert exc_info.value.details.get("reason") == "unsupported_file_type"
 
 
 def test_ingest_rejects_invalid_content_type(service: DocumentIngestionService) -> None:

@@ -23,7 +23,10 @@ def query_client() -> TestClient:
             Citation(
                 document_id="doc-1",
                 filename="a.pdf",
+                file_type="pdf",
+                source="a.pdf",
                 page_number=2,
+                section=None,
                 chunk_index=0,
                 chunk_id="c1",
                 score=0.9,

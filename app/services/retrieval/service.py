@@ -2,29 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any
-
 from app.core.config import Settings
-from app.core.exceptions import AppError, QueryError
+from app.core.exceptions import AppError, ProviderError, QueryError
 from app.core.logging import get_logger
 from app.services.embeddings.base import EmbeddingService
+from app.services.retrieval.chunk_mapping import payload_to_retrieved_chunk
+from app.services.retrieval.filters import RetrievalFilters
+from app.services.retrieval.models import RetrievedChunk
 from app.vector_store.base import VectorStore
 
 logger = get_logger(__name__)
 
-
-@dataclass(slots=True, frozen=True)
-class RetrievedChunk:
-    """A retrieved chunk with citation-ready metadata."""
-
-    chunk_id: str
-    text: str
-    document_id: str
-    filename: str
-    page_number: int
-    chunk_index: int
-    score: float
+__all__ = ["RetrievalService", "RetrievedChunk"]
 
 
 class RetrievalService:
@@ -45,7 +34,7 @@ class RetrievalService:
         query: str,
         *,
         top_k: int | None = None,
-        filters: dict[str, Any] | None = None,
+        filters: RetrievalFilters | None = None,
         score_threshold: float | None = None,
     ) -> list[RetrievedChunk]:
         """
@@ -73,13 +62,15 @@ class RetrievalService:
             else self._settings.retrieval_score_threshold
         )
 
+        payload_filter = filters.to_payload_filter() if filters else None
+
         logger.info(
             "retrieval_started",
             extra={
                 "operation": "retrieve",
                 "query_length": len(normalized),
                 "top_k": limit,
-                "has_filters": bool(filters),
+                "has_filters": payload_filter is not None,
             },
         )
 
@@ -95,7 +86,11 @@ class RetrievalService:
                     "error_type": type(exc).__name__,
                 },
             )
-            raise
+            raise ProviderError(
+                "Failed to embed query for retrieval",
+                provider=self._embedding_service.provider_name,
+                details={"reason": "embedding_failed"},
+            ) from exc
 
         try:
             hits = self._vector_store.search(
@@ -103,12 +98,14 @@ class RetrievalService:
                 query_vector,
                 limit=limit,
                 score_threshold=threshold,
-                filters=filters,
+                filters=payload_filter,
             )
         except AppError:
             raise
 
-        chunks = [self._to_chunk(hit.id, hit.score, hit.payload) for hit in hits]
+        chunks = [
+            payload_to_retrieved_chunk(hit.id, hit.score, hit.payload) for hit in hits
+        ]
         logger.info(
             "retrieval_completed",
             extra={
@@ -118,25 +115,3 @@ class RetrievalService:
             },
         )
         return chunks
-
-    def _to_chunk(self, point_id: str, score: float, payload: dict[str, Any]) -> RetrievedChunk:
-        page_number = payload.get("page_number", 0)
-        chunk_index = payload.get("chunk_index", 0)
-        try:
-            page_number_int = int(page_number)
-        except (TypeError, ValueError):
-            page_number_int = 0
-        try:
-            chunk_index_int = int(chunk_index)
-        except (TypeError, ValueError):
-            chunk_index_int = 0
-
-        return RetrievedChunk(
-            chunk_id=str(point_id),
-            text=str(payload.get("text", "")),
-            document_id=str(payload.get("document_id", "")),
-            filename=str(payload.get("filename", "")),
-            page_number=page_number_int,
-            chunk_index=chunk_index_int,
-            score=float(score),
-        )

@@ -24,19 +24,20 @@ def query_documents(
     rag_service: RAGServiceDep,
 ) -> QueryResponse:
     """Run Basic RAG: retrieve → prompt → generate → cite."""
+    retrieval_filters = body.build_retrieval_filters()
     logger.info(
         "query_request_received",
         extra={
             "operation": "query_documents",
             "query_length": len(body.query),
             "top_k": body.top_k,
-            "has_filters": bool(body.filters),
+            "has_filters": retrieval_filters is not None,
         },
     )
     result = rag_service.answer(
         body.query,
         top_k=body.top_k,
-        filters=body.filters,
+        filters=retrieval_filters,
     )
     return QueryResponse(
         answer=result.answer,
@@ -44,7 +45,10 @@ def query_documents(
             CitationResponse(
                 document_id=citation.document_id,
                 filename=citation.filename,
+                file_type=citation.file_type,
+                source=citation.source,
                 page_number=citation.page_number,
+                section=citation.section,
                 chunk_index=citation.chunk_index,
                 chunk_id=citation.chunk_id,
                 score=citation.score,

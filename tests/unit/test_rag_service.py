@@ -35,8 +35,12 @@ def test_successful_rag_flow(rag: RAGService, retrieval: MagicMock, llm: MagicMo
             text="Cats are mammals.",
             document_id="doc-1",
             filename="animals.pdf",
+            file_type="pdf",
+            source="animals.pdf",
             page_number=1,
+            section=None,
             chunk_index=0,
+            chunking_strategy="fixed",
             score=0.95,
         )
     ]
@@ -69,8 +73,12 @@ def test_groq_failure_propagates(rag: RAGService, retrieval: MagicMock, llm: Mag
             text="context",
             document_id="d",
             filename="f.pdf",
+            file_type="pdf",
+            source="f.pdf",
             page_number=1,
+            section=None,
             chunk_index=0,
+            chunking_strategy="fixed",
             score=0.5,
         )
     ]

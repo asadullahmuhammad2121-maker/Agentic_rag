@@ -6,14 +6,40 @@ from pydantic import BaseModel, Field
 
 
 class DocumentIngestResponse(BaseModel):
-    """Response returned after a successful PDF ingestion."""
+    """Response returned after a successful document ingestion."""
 
     document_id: str
     filename: str
     content_type: str
+    file_type: str
     file_size: int = Field(ge=0)
     checksum: str
+    source: str
     page_count: int = Field(ge=1)
     pages_stored: int = Field(ge=1)
     chunks_stored: int = Field(ge=1)
+    status: Literal["ingested"] = "ingested"
+
+
+class DocumentBatchIngestItem(BaseModel):
+    """Single document result within a batch upload response."""
+
+    document_id: str
+    filename: str
+    content_type: str
+    file_type: str
+    file_size: int = Field(ge=0)
+    checksum: str
+    source: str
+    page_count: int = Field(ge=1)
+    pages_stored: int = Field(ge=1)
+    chunks_stored: int = Field(ge=1)
+    status: Literal["ingested"] = "ingested"
+
+
+class DocumentBatchIngestResponse(BaseModel):
+    """Response returned after ingesting multiple documents."""
+
+    documents: list[DocumentBatchIngestItem]
+    total_documents: int = Field(ge=1)
     status: Literal["ingested"] = "ingested"

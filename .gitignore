@@ -39,6 +39,7 @@ Thumbs.db
 
 # Docker / local data
 qdrant_storage/
+keyword_index/
 snapshots/
 .qdrant-initialized
 *.log

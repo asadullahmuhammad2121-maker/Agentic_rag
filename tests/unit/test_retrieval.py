@@ -7,8 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 
 from app.core.exceptions import ProviderError, QdrantConnectionError, QueryError
+from app.services.retrieval.filters import RetrievalFilters
 from app.services.retrieval.service import RetrievalService
 from app.vector_store.base import SearchResult
+from app.vector_store.filters import PayloadFilter
 from tests.conftest import make_settings
 
 
@@ -46,8 +48,13 @@ def test_retrieve_maps_hits(
                 "text": "chunk text",
                 "document_id": "doc-1",
                 "filename": "a.pdf",
+                "file_type": "pdf",
+                "source": "a.pdf",
                 "page_number": 2,
+                "section": None,
                 "chunk_index": 1,
+                "chunk_id": "doc-1:00001",
+                "chunking_strategy": "fixed",
             },
         )
     ]
@@ -78,8 +85,11 @@ def test_retrieve_passes_metadata_filters(
     vector_store: MagicMock,
 ) -> None:
     vector_store.search.return_value = []
-    retrieval.retrieve("q", filters={"document_id": "doc-1"})
-    assert vector_store.search.call_args.kwargs["filters"] == {"document_id": "doc-1"}
+    filters = RetrievalFilters.from_query(document_ids=["doc-1"])
+    retrieval.retrieve("q", filters=filters)
+    assert vector_store.search.call_args.kwargs["filters"] == PayloadFilter(
+        exact={"document_id": "doc-1"}
+    )
 
 
 def test_retrieve_empty_results(
@@ -114,3 +124,13 @@ def test_retrieve_embedding_failure(
     )
     with pytest.raises(ProviderError):
         retrieval.retrieve("q")
+
+
+def test_retrieve_wraps_unexpected_embedding_failure(
+    retrieval: RetrievalService,
+    embedding_service: MagicMock,
+) -> None:
+    embedding_service.embed_query.side_effect = RuntimeError("network down")
+    with pytest.raises(ProviderError) as exc_info:
+        retrieval.retrieve("q")
+    assert exc_info.value.details.get("provider") == embedding_service.provider_name

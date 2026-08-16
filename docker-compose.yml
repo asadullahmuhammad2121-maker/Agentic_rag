@@ -25,11 +25,22 @@ services:
     env_file:
       - .env
     environment:
+      # Override host-local Qdrant URL for in-compose networking.
       QDRANT_URL: http://qdrant:6333
+      KEYWORD_INDEX_PATH: /app/data/keyword_index/index.json
+    volumes:
+      - keyword_index_data:/app/data/keyword_index
     depends_on:
       qdrant:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 volumes:
   qdrant_storage:
+  keyword_index_data:

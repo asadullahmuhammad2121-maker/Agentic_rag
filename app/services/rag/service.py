@@ -6,8 +6,12 @@ from dataclasses import dataclass
 
 from app.core.exceptions import AppError, QueryError
 from app.core.logging import get_logger
+from app.services.context_optimization.base import ContextOptimizer
 from app.services.llm.base import LLMService
+from app.services.query_transformation.service import QueryTransformationService
 from app.services.rag.prompt_builder import PromptBuilder
+from app.services.retrieval.filters import RetrievalFilters
+from app.services.retrieval.multi_query import MultiQueryRetrievalService
 from app.services.retrieval.service import RetrievalService, RetrievedChunk
 
 logger = get_logger(__name__)
@@ -23,7 +27,10 @@ class Citation:
 
     document_id: str
     filename: str
+    file_type: str
+    source: str
     page_number: int
+    section: str | None
     chunk_index: int
     chunk_id: str
     score: float
@@ -43,21 +50,25 @@ class RAGService:
 
     def __init__(
         self,
-        retrieval_service: RetrievalService,
+        retrieval_service: RetrievalService | MultiQueryRetrievalService,
         llm_service: LLMService,
         *,
         prompt_builder: PromptBuilder | None = None,
+        query_transformer: QueryTransformationService | None = None,
+        context_optimizer: ContextOptimizer | None = None,
     ) -> None:
         self._retrieval = retrieval_service
         self._llm = llm_service
         self._prompt_builder = prompt_builder or PromptBuilder()
+        self._query_transformer = query_transformer
+        self._context_optimizer = context_optimizer
 
     def answer(
         self,
         query: str,
         *,
         top_k: int | None = None,
-        filters: dict[str, str | int] | None = None,
+        filters: RetrievalFilters | None = None,
     ) -> RAGResult:
         normalized = query.strip()
         if not normalized:
@@ -72,15 +83,30 @@ class RAGService:
                 "operation": "rag_answer",
                 "query_length": len(normalized),
                 "top_k": top_k,
-                "has_filters": bool(filters),
+                "has_filters": filters is not None and not filters.is_empty(),
+                "query_transformation_enabled": self._query_transformer is not None,
             },
         )
 
+        retrieval_query = normalized
+        if self._query_transformer is not None:
+            transformed = self._query_transformer.transform(normalized)
+            retrieval_query = transformed.transformed_query
+            logger.info(
+                "rag_query_transformation_applied",
+                extra={
+                    "operation": "rag_answer",
+                    "was_transformed": transformed.was_transformed,
+                    "original_query_length": len(transformed.original_query),
+                    "retrieval_query_length": len(retrieval_query),
+                },
+            )
+
         try:
             chunks = self._retrieval.retrieve(
-                normalized,
+                retrieval_query,
                 top_k=top_k,
-                filters=dict(filters) if filters else None,
+                filters=filters,
             )
         except AppError:
             raise
@@ -91,6 +117,25 @@ class RAGService:
                 extra={"operation": "rag_answer", "result_count": 0},
             )
             return RAGResult(answer=EMPTY_RETRIEVAL_ANSWER, citations=[])
+
+        if self._context_optimizer is not None:
+            optimization = self._context_optimizer.optimize(chunks)
+            chunks = optimization.chunks
+            logger.info(
+                "rag_context_optimized",
+                extra={
+                    "operation": "rag_answer",
+                    "removed_count": optimization.removed_count,
+                    "estimated_tokens": optimization.estimated_tokens,
+                    "result_count": len(chunks),
+                },
+            )
+            if not chunks:
+                logger.info(
+                    "rag_empty_context_after_optimization",
+                    extra={"operation": "rag_answer", "result_count": 0},
+                )
+                return RAGResult(answer=EMPTY_RETRIEVAL_ANSWER, citations=[])
 
         prompt = self._prompt_builder.build(normalized, chunks)
         try:
@@ -120,7 +165,10 @@ class RAGService:
                 Citation(
                     document_id=chunk.document_id,
                     filename=chunk.filename,
+                    file_type=chunk.file_type,
+                    source=chunk.source,
                     page_number=chunk.page_number,
+                    section=chunk.section,
                     chunk_index=chunk.chunk_index,
                     chunk_id=chunk.chunk_id,
                     score=chunk.score,

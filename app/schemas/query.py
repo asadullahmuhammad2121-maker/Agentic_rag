@@ -1,8 +1,12 @@
 """Query / RAG API schemas."""
 
+from __future__ import annotations
+
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
+
+from app.services.retrieval.filters import RetrievalFilters
 
 
 class QueryRequest(BaseModel):
@@ -15,10 +19,47 @@ class QueryRequest(BaseModel):
         le=50,
         description="Optional override for number of chunks to retrieve",
     )
+    document_ids: list[str] | None = Field(
+        default=None,
+        description="Optional document IDs to restrict retrieval",
+    )
+    filenames: list[str] | None = Field(
+        default=None,
+        description="Optional filenames to restrict retrieval",
+    )
+    file_types: list[str] | None = Field(
+        default=None,
+        description="Optional file types to restrict retrieval (e.g. pdf, txt)",
+    )
+    sections: list[str] | None = Field(
+        default=None,
+        description="Optional section names to restrict retrieval",
+    )
     filters: dict[str, str | int] | None = Field(
         default=None,
-        description="Optional exact-match metadata filters (e.g. document_id, filename)",
+        description="Deprecated exact-match metadata filters; prefer structured filter fields",
     )
+
+    @field_validator("document_ids", "filenames", "file_types", "sections")
+    @classmethod
+    def normalize_filter_lists(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        cleaned = [item.strip() for item in value if item and item.strip()]
+        if not cleaned:
+            msg = "Filter list must not contain empty values"
+            raise ValueError(msg)
+        return cleaned
+
+    def build_retrieval_filters(self) -> RetrievalFilters | None:
+        """Convert request fields into validated retrieval filters."""
+        return RetrievalFilters.from_query(
+            document_ids=self.document_ids,
+            filenames=self.filenames,
+            file_types=self.file_types,
+            sections=self.sections,
+            legacy_filters=self.filters,
+        )
 
 
 class CitationResponse(BaseModel):
@@ -26,7 +67,10 @@ class CitationResponse(BaseModel):
 
     document_id: str
     filename: str
+    file_type: str
+    source: str
     page_number: int
+    section: str | None = None
     chunk_index: int
     chunk_id: str = Field(description="Vector-store point / chunk reference")
     score: float

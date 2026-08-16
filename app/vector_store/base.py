@@ -7,6 +7,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
+from app.vector_store.filters import PayloadFilter
+
 
 @dataclass(slots=True)
 class VectorRecord:
@@ -63,12 +65,12 @@ class VectorStore(ABC):
         *,
         limit: int = 10,
         score_threshold: float | None = None,
-        filters: dict[str, Any] | None = None,
+        filters: PayloadFilter | None = None,
     ) -> list[SearchResult]:
         """
         Run a similarity search against a collection.
 
-        ``filters`` is an optional mapping of payload field → exact match value.
+        ``filters`` is an optional structured payload filter specification.
         """
 
     @abstractmethod

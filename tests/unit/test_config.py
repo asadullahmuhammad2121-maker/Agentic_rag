@@ -13,8 +13,18 @@ def test_settings_loads_defaults() -> None:
     assert settings.app_name == "rag-foundation"
     assert settings.app_version == "0.1.0"
     assert settings.embedding_dimension == 384
+    assert settings.chunking_strategy == "fixed"
+    assert settings.query_transformation_enabled is False
+    assert settings.multi_query_enabled is False
+    assert settings.multi_query_count == 3
+    assert settings.context_optimization_enabled is False
+    assert settings.context_max_chunks == 8
+    assert settings.context_max_tokens == 6000
+    assert settings.context_min_score == 0.0
     assert settings.chunk_size == 500
     assert settings.chunk_overlap == 50
+    assert settings.chunk_min_size == 20
+    assert settings.chunk_max_size == 2000
     assert settings.embedding_batch_size == 16
     assert settings.qdrant_url == "http://localhost:6333"
     assert settings.max_upload_file_size_bytes == 25 * 1024 * 1024
@@ -23,6 +33,11 @@ def test_settings_loads_defaults() -> None:
 def test_settings_rejects_invalid_chunk_overlap() -> None:
     with pytest.raises(ValidationError):
         make_settings(chunk_size=100, chunk_overlap=100)
+
+
+def test_settings_rejects_chunk_min_size_above_chunk_size() -> None:
+    with pytest.raises(ValidationError):
+        make_settings(chunk_size=100, chunk_min_size=150)
 
 
 def test_settings_rejects_invalid_qdrant_url() -> None:

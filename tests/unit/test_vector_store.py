@@ -9,6 +9,7 @@ import pytest
 
 from app.core.exceptions import QdrantConnectionError, VectorStoreError
 from app.vector_store.base import VectorRecord
+from app.vector_store.filters import PayloadFilter
 from app.vector_store.qdrant import QdrantVectorStore
 from tests.conftest import make_settings
 
@@ -95,7 +96,7 @@ def test_search_passes_metadata_filters(store: QdrantVectorStore, mock_client: M
     response.points = []
     mock_client.query_points.return_value = response
 
-    store.search("docs", [0.1], limit=2, filters={"document_id": "doc-1"})
+    store.search("docs", [0.1], limit=2, filters=PayloadFilter(exact={"document_id": "doc-1"}))
     kwargs = mock_client.query_points.call_args.kwargs
     assert kwargs["limit"] == 2
     assert kwargs["query_filter"] is not None

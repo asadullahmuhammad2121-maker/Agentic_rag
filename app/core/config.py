@@ -59,7 +59,11 @@ class Settings(BaseSettings):
         description="Max texts per embedding batch",
     )
 
-    # Chunking (Phase 1C)
+    # Chunking (Phase 1C / Phase 2B)
+    chunking_strategy: Literal["fixed", "recursive", "semantic", "structure"] = Field(
+        default="fixed",
+        description="Active chunking strategy",
+    )
     chunk_size: int = Field(
         default=500,
         gt=0,
@@ -69,6 +73,22 @@ class Settings(BaseSettings):
         default=50,
         ge=0,
         description="Character overlap between consecutive chunks",
+    )
+    chunk_min_size: int = Field(
+        default=20,
+        gt=0,
+        description="Minimum chunk size; smaller chunks are merged when possible",
+    )
+    chunk_max_size: int = Field(
+        default=2000,
+        gt=0,
+        description="Maximum chunk size; larger chunks are split",
+    )
+    semantic_similarity_threshold: float = Field(
+        default=0.72,
+        ge=0.0,
+        le=1.0,
+        description="Cosine similarity breakpoint for semantic chunking",
     )
 
     # Retrieval (Phase 1D)
@@ -83,6 +103,96 @@ class Settings(BaseSettings):
         ge=0.0,
         le=1.0,
         description="Optional minimum similarity score for retrieval hits",
+    )
+
+    # Query transformation (Phase 2D)
+    query_transformation_enabled: bool = Field(
+        default=False,
+        description="Rewrite user queries for retrieval using Groq",
+    )
+    query_transformation_max_tokens: int = Field(
+        default=256,
+        gt=0,
+        le=1024,
+        description="Max tokens for query rewriting completions",
+    )
+
+    # Multi-query retrieval (Phase 2E)
+    multi_query_enabled: bool = Field(
+        default=False,
+        description="Generate multiple retrieval queries and combine results",
+    )
+    multi_query_count: int = Field(
+        default=3,
+        ge=2,
+        le=10,
+        description="Number of diverse retrieval queries to generate",
+    )
+    multi_query_max_tokens: int = Field(
+        default=512,
+        gt=0,
+        le=2048,
+        description="Max tokens for multi-query generation completions",
+    )
+
+    # Hybrid search (Phase 2F)
+    hybrid_search_enabled: bool = Field(
+        default=False,
+        description="Combine vector and BM25 keyword retrieval",
+    )
+    vector_search_weight: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Weight for vector results in hybrid rank fusion",
+    )
+    keyword_search_weight: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Weight for keyword results in hybrid rank fusion",
+    )
+    hybrid_top_k: int = Field(
+        default=10,
+        gt=0,
+        le=50,
+        description="Default number of fused chunks to return when hybrid search is enabled",
+    )
+    keyword_index_path: str = Field(
+        default="keyword_index/index.json",
+        description="Filesystem path for the BM25 keyword index",
+    )
+
+    # Context optimization (Phase 2H)
+    context_optimization_enabled: bool = Field(
+        default=False,
+        description="Optimize retrieved context before prompt construction",
+    )
+    context_max_chunks: int = Field(
+        default=8,
+        gt=0,
+        le=50,
+        description="Maximum number of chunks to include in optimized context",
+    )
+    context_max_tokens: int = Field(
+        default=6000,
+        gt=0,
+        le=100_000,
+        description="Estimated token budget for optimized context chunks",
+    )
+    context_min_score: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=1.0,
+        description="Minimum reliable retrieval score for chunk inclusion",
+    )
+
+    # Upload limits
+    max_batch_upload_files: int = Field(
+        default=20,
+        gt=0,
+        le=100,
+        description="Maximum number of files allowed in one batch upload request",
     )
 
     # LLM generation (Phase 1E)
@@ -128,9 +238,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_chunking(self) -> Self:
-        """Ensure overlap is strictly smaller than chunk size when overlap is used."""
+        """Ensure chunking settings are internally consistent."""
         if self.chunk_overlap >= self.chunk_size:
             msg = "CHUNK_OVERLAP must be smaller than CHUNK_SIZE"
+            raise ValueError(msg)
+        if self.chunk_min_size > self.chunk_size:
+            msg = "CHUNK_MIN_SIZE must not exceed CHUNK_SIZE"
+            raise ValueError(msg)
+        if self.chunk_max_size < self.chunk_size:
+            msg = "CHUNK_MAX_SIZE must be greater than or equal to CHUNK_SIZE"
             raise ValueError(msg)
         return self
 

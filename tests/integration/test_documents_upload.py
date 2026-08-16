@@ -18,12 +18,14 @@ from tests.helpers.pdf_fixtures import build_pdf_bytes
 def upload_client() -> TestClient:
     application = create_app()
     mock_ingestion = MagicMock()
-    mock_ingestion.ingest_pdf.return_value = IngestedDocument(
+    mock_ingestion.ingest_document.return_value = IngestedDocument(
         document_id="doc-123",
         filename="sample.pdf",
         content_type="application/pdf",
+        file_type="pdf",
         file_size=100,
         checksum="abc",
+        source="sample.pdf",
         page_count=2,
         pages_stored=2,
         chunks_stored=4,
@@ -49,15 +51,15 @@ def test_upload_valid_pdf(upload_client: TestClient) -> None:
     assert body["status"] == "ingested"
     assert body["page_count"] == 2
     assert body["chunks_stored"] == 4
-    upload_client.mock_ingestion.ingest_pdf.assert_called_once()  # type: ignore[attr-defined]
+    upload_client.mock_ingestion.ingest_document.assert_called_once()  # type: ignore[attr-defined]
 
 
 def test_upload_invalid_document_returns_400() -> None:
     application = create_app()
     mock_ingestion = MagicMock()
-    mock_ingestion.ingest_pdf.side_effect = InvalidDocumentError(
-        "Only PDF files are supported",
-        details={"reason": "invalid_extension"},
+    mock_ingestion.ingest_document.side_effect = InvalidDocumentError(
+        "Unsupported file type",
+        details={"reason": "unsupported_file_type"},
     )
     application.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion
 
@@ -75,7 +77,7 @@ def test_upload_invalid_document_returns_400() -> None:
 def test_upload_duplicate_returns_409() -> None:
     application = create_app()
     mock_ingestion = MagicMock()
-    mock_ingestion.ingest_pdf.side_effect = DuplicateDocumentError(
+    mock_ingestion.ingest_document.side_effect = DuplicateDocumentError(
         details={"existing_document_id": "doc-1", "checksum": "xyz"},
     )
     application.dependency_overrides[get_ingestion_service] = lambda: mock_ingestion

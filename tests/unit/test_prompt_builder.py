@@ -12,8 +12,12 @@ def _chunk(**overrides: object) -> RetrievedChunk:
         "text": "Relevant text about cats.",
         "document_id": "doc-1",
         "filename": "pets.pdf",
+        "file_type": "pdf",
+        "source": "pets.pdf",
         "page_number": 3,
+        "section": None,
         "chunk_index": 0,
+        "chunking_strategy": "fixed",
         "score": 0.88,
     }
     base.update(overrides)

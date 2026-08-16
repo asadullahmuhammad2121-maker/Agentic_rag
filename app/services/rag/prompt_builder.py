@@ -64,10 +64,13 @@ class PromptBuilder:
         sections: list[str] = []
         for index, chunk in enumerate(chunks, start=1):
             label = f"S{index}"
+            section_part = f" section={chunk.section}" if chunk.section else ""
             header = (
                 f"[{label}] document_id={chunk.document_id} "
                 f"filename={chunk.filename} "
-                f"page={chunk.page_number} "
+                f"file_type={chunk.file_type} "
+                f"source={chunk.source} "
+                f"page={chunk.page_number}{section_part} "
                 f"chunk_index={chunk.chunk_index} "
                 f"chunk_id={chunk.chunk_id} "
                 f"score={chunk.score:.4f}"

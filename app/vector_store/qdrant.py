@@ -13,6 +13,7 @@ from app.core.config import Settings
 from app.core.exceptions import QdrantConnectionError, VectorStoreError
 from app.core.logging import get_logger
 from app.vector_store.base import SearchResult, VectorRecord, VectorStore
+from app.vector_store.filters import PayloadFilter
 
 logger = get_logger(__name__)
 
@@ -200,9 +201,9 @@ class QdrantVectorStore(VectorStore):
         *,
         limit: int = 10,
         score_threshold: float | None = None,
-        filters: dict[str, Any] | None = None,
+        filters: PayloadFilter | None = None,
     ) -> list[SearchResult]:
-        query_filter = _build_payload_filter(filters)
+        query_filter = build_qdrant_filter(filters)
         try:
             response = self._client.query_points(
                 collection_name=collection_name,
@@ -288,7 +289,7 @@ class QdrantVectorStore(VectorStore):
         if not conditions:
             return []
 
-        query_filter = _build_payload_filter(conditions)
+        query_filter = build_qdrant_filter(PayloadFilter.from_legacy_dict(conditions))
         if query_filter is None:
             return []
 
@@ -389,17 +390,26 @@ class QdrantVectorStore(VectorStore):
             ) from exc
 
 
-def _build_payload_filter(conditions: dict[str, Any] | None) -> qmodels.Filter | None:
-    """Build a Qdrant payload filter from exact-match key/value conditions."""
-    if not conditions:
+def build_qdrant_filter(payload_filter: PayloadFilter | None) -> qmodels.Filter | None:
+    """Build a Qdrant payload filter from a structured filter specification."""
+    if payload_filter is None or payload_filter.is_empty():
         return None
-    must_conditions = [
-        qmodels.FieldCondition(
-            key=key,
-            match=qmodels.MatchValue(value=value),
+
+    must_conditions: list[qmodels.Condition] = []
+    for key, value in payload_filter.exact.items():
+        must_conditions.append(
+            qmodels.FieldCondition(
+                key=key,
+                match=qmodels.MatchValue(value=value),
+            )
         )
-        for key, value in conditions.items()
-    ]
+    for key, values in payload_filter.any_of.items():
+        must_conditions.append(
+            qmodels.FieldCondition(
+                key=key,
+                match=qmodels.MatchAny(any=list(values)),
+            )
+        )
     return qmodels.Filter(must=must_conditions)
 
 

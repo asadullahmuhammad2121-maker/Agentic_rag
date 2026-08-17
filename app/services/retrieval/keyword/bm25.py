@@ -13,6 +13,7 @@ from app.core.logging import get_logger
 from app.services.retrieval.chunk_mapping import payload_to_retrieved_chunk
 from app.services.retrieval.filters import RetrievalFilters
 from app.services.retrieval.keyword.base import KeywordSearch
+from app.services.retrieval.keyword.persistence import atomic_write_text, index_file_lock
 from app.services.retrieval.service import RetrievedChunk
 from app.vector_store.base import VectorRecord
 
@@ -76,34 +77,60 @@ class BM25Scorer:
 class BM25KeywordSearch(KeywordSearch):
     """Persistent in-memory BM25 index backed by a JSON file."""
 
-    def __init__(self, index_path: str | Path) -> None:
+    def __init__(
+        self,
+        index_path: str | Path,
+        *,
+        lock_timeout_seconds: float = 30.0,
+    ) -> None:
         self._index_path = Path(index_path)
+        self._lock_path = self._index_path.with_suffix(f"{self._index_path.suffix}.lock")
+        self._lock_timeout_seconds = lock_timeout_seconds
         self._chunks: list[IndexedChunk] = []
         self._chunk_index_by_id: dict[str, int] = {}
         self._scorer: BM25Scorer | None = None
+        self._loaded_mtime: float = 0.0
         self._load()
+
+    def health_check(self) -> bool:
+        """Return True when the keyword index directory is accessible."""
+        try:
+            self._index_path.parent.mkdir(parents=True, exist_ok=True)
+            return self._index_path.parent.exists() and self._index_path.parent.is_dir()
+        except OSError:
+            return False
 
     def index_records(self, records: list[VectorRecord]) -> None:
         if not records:
             return
 
-        updated = 0
-        for record in records:
-            text = str(record.payload.get("text", "")).strip()
-            if not text:
-                continue
-            chunk_id = str(record.payload.get("chunk_id") or record.id)
-            indexed = IndexedChunk(chunk_id=chunk_id, text=text, payload=dict(record.payload))
-            existing_index = self._chunk_index_by_id.get(chunk_id)
-            if existing_index is not None:
-                self._chunks[existing_index] = indexed
-            else:
-                self._chunk_index_by_id[chunk_id] = len(self._chunks)
-                self._chunks.append(indexed)
-            updated += 1
+        with index_file_lock(
+            self._lock_path,
+            exclusive=True,
+            timeout_seconds=self._lock_timeout_seconds,
+        ):
+            self._reload_if_changed()
+            updated = 0
+            for record in records:
+                text = str(record.payload.get("text", "")).strip()
+                if not text:
+                    continue
+                chunk_id = str(record.payload.get("chunk_id") or record.id)
+                indexed = IndexedChunk(
+                    chunk_id=chunk_id,
+                    text=text,
+                    payload=dict(record.payload),
+                )
+                existing_index = self._chunk_index_by_id.get(chunk_id)
+                if existing_index is not None:
+                    self._chunks[existing_index] = indexed
+                else:
+                    self._chunk_index_by_id[chunk_id] = len(self._chunks)
+                    self._chunks.append(indexed)
+                updated += 1
 
-        self._rebuild_scorer()
-        self._save()
+            self._rebuild_scorer()
+            self._save_locked()
         logger.info(
             "keyword_index_updated",
             extra={
@@ -120,6 +147,21 @@ class BM25KeywordSearch(KeywordSearch):
         *,
         top_k: int,
         filters: RetrievalFilters | None = None,
+    ) -> list[RetrievedChunk]:
+        with index_file_lock(
+            self._lock_path,
+            exclusive=False,
+            timeout_seconds=self._lock_timeout_seconds,
+        ):
+            self._reload_if_changed()
+            return self._search_loaded(query, top_k=top_k, filters=filters)
+
+    def _search_loaded(
+        self,
+        query: str,
+        *,
+        top_k: int,
+        filters: RetrievalFilters | None,
     ) -> list[RetrievedChunk]:
         normalized = query.strip()
         if not normalized or top_k <= 0 or not self._chunks or self._scorer is None:
@@ -149,13 +191,30 @@ class BM25KeywordSearch(KeywordSearch):
                 break
         return results
 
+    def _reload_if_changed(self) -> None:
+        if not self._index_path.exists():
+            return
+        mtime = self._index_path.stat().st_mtime
+        if mtime > self._loaded_mtime:
+            self._load_from_disk()
+            self._loaded_mtime = mtime
+
     def _rebuild_scorer(self) -> None:
         tokenized = [tokenize(chunk.text) for chunk in self._chunks]
         self._scorer = BM25Scorer(tokenized) if tokenized else None
 
     def _load(self) -> None:
+        self._index_path.parent.mkdir(parents=True, exist_ok=True)
         if not self._index_path.exists():
-            self._index_path.parent.mkdir(parents=True, exist_ok=True)
+            return
+        self._load_from_disk()
+        self._loaded_mtime = self._index_path.stat().st_mtime
+
+    def _load_from_disk(self) -> None:
+        if not self._index_path.exists():
+            self._chunks = []
+            self._chunk_index_by_id = {}
+            self._scorer = None
             return
 
         try:
@@ -198,8 +257,7 @@ class BM25KeywordSearch(KeywordSearch):
         self._chunk_index_by_id = {chunk.chunk_id: index for index, chunk in enumerate(loaded)}
         self._rebuild_scorer()
 
-    def _save(self) -> None:
-        self._index_path.parent.mkdir(parents=True, exist_ok=True)
+    def _save_locked(self) -> None:
         payload = {
             "version": _INDEX_VERSION,
             "chunks": [
@@ -211,10 +269,11 @@ class BM25KeywordSearch(KeywordSearch):
                 for chunk in self._chunks
             ],
         }
-        self._index_path.write_text(
+        atomic_write_text(
+            self._index_path,
             json.dumps(payload, ensure_ascii=False, separators=(",", ":")),
-            encoding="utf-8",
         )
+        self._loaded_mtime = self._index_path.stat().st_mtime
 
 
 def tokenize(text: str) -> list[str]:

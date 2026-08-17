@@ -8,6 +8,15 @@ from typing import Annotated
 from fastapi import Depends
 
 from app.core.config import Settings, get_settings
+from app.services.agent.base import Agent
+from app.services.agent.foundation import FoundationAgent
+from app.services.agent.generation.web import WebAnswerGenerator
+from app.services.agent.planning.planner import QueryPlanner
+from app.services.agent.routing.router import QueryRouter
+from app.services.agent.service import AgentService
+from app.services.agent.tools.base import Tool
+from app.services.agent.tools.rag import RAGRetrievalTool
+from app.services.agent.tools.registry import ToolRegistry
 from app.services.context_optimization.service import ContextOptimizationService
 from app.services.embeddings.base import EmbeddingService
 from app.services.embeddings.huggingface import HuggingFaceEmbeddingService
@@ -45,7 +54,11 @@ def get_vector_store() -> VectorStore:
 @lru_cache
 def get_keyword_search() -> BM25KeywordSearch:
     """Provide the BM25 keyword index."""
-    return BM25KeywordSearch(get_settings().keyword_index_path)
+    settings = get_settings()
+    return BM25KeywordSearch(
+        settings.keyword_index_path,
+        lock_timeout_seconds=settings.keyword_index_lock_timeout_seconds,
+    )
 
 
 def get_ingestion_service(
@@ -141,6 +154,85 @@ def get_rag_service(
     )
 
 
+def get_rag_retrieval_tool(
+    rag_service: Annotated[RAGService, Depends(get_rag_service)],
+) -> RAGRetrievalTool:
+    """Provide the internal RAG retrieval tool."""
+    return RAGRetrievalTool(rag_service)
+
+
+def get_tavily_web_search_tool(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Tool | None:
+    """Provide the Tavily web search tool when enabled and configured."""
+    if not settings.tavily_configured:
+        return None
+    from app.services.agent.tools.tavily import TavilyWebSearchTool
+
+    return TavilyWebSearchTool(settings)
+
+
+def get_tool_registry(
+    rag_tool: Annotated[RAGRetrievalTool, Depends(get_rag_retrieval_tool)],
+    tavily_tool: Annotated[Tool | None, Depends(get_tavily_web_search_tool)],
+) -> ToolRegistry:
+    """Provide the agent tool registry (RAG plus optional Tavily)."""
+    tools: list[Tool] = [rag_tool]
+    if tavily_tool is not None:
+        tools.append(tavily_tool)
+    return ToolRegistry(tools)
+
+
+def get_web_answer_generator(
+    settings: Annotated[Settings, Depends(get_settings)],
+    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+) -> WebAnswerGenerator:
+    """Provide web answer generation for Tavily search results."""
+    return WebAnswerGenerator(llm_service, settings)
+
+
+def get_query_router(
+    settings: Annotated[Settings, Depends(get_settings)],
+    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+) -> QueryRouter:
+    """Provide the LLM query router for agent tool selection."""
+    return QueryRouter(settings, llm_service)
+
+
+def get_query_planner(
+    settings: Annotated[Settings, Depends(get_settings)],
+    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+) -> QueryPlanner:
+    """Provide the LLM query planner for hybrid decomposition."""
+    return QueryPlanner(settings, llm_service)
+
+
+def get_agent(
+    settings: Annotated[Settings, Depends(get_settings)],
+    router: Annotated[QueryRouter, Depends(get_query_router)],
+    planner: Annotated[QueryPlanner, Depends(get_query_planner)],
+) -> Agent:
+    """Provide the foundation agent."""
+    return FoundationAgent(router, planner, settings)
+
+
+def get_agent_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    agent: Annotated[Agent, Depends(get_agent)],
+    tools: Annotated[ToolRegistry, Depends(get_tool_registry)],
+    rag_service: Annotated[RAGService, Depends(get_rag_service)],
+    web_answer_generator: Annotated[WebAnswerGenerator, Depends(get_web_answer_generator)],
+) -> AgentService:
+    """Provide the agent orchestrator."""
+    return AgentService(
+        agent=agent,
+        tools=tools,
+        rag_service=rag_service,
+        web_answer_generator=web_answer_generator,
+        max_steps=settings.agent_max_steps,
+    )
+
+
 def clear_dependency_caches() -> None:
     """Clear cached dependencies (for tests)."""
     get_llm_service.cache_clear()
@@ -153,6 +245,8 @@ SettingsDep = Annotated[Settings, Depends(get_settings)]
 LLMServiceDep = Annotated[LLMService, Depends(get_llm_service)]
 EmbeddingServiceDep = Annotated[EmbeddingService, Depends(get_embedding_service)]
 VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
+KeywordSearchDep = Annotated[BM25KeywordSearch, Depends(get_keyword_search)]
 IngestionServiceDep = Annotated[DocumentIngestionService, Depends(get_ingestion_service)]
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
+AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]

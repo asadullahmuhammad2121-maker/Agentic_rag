@@ -87,6 +87,9 @@ def make_settings(**overrides: Any) -> Settings:
         "qdrant_url": "http://localhost:6333",
         "qdrant_collection_name": "documents_test",
         "embedding_dimension": 384,
+        "tavily_enabled": False,
     }
+    if "web_search_enabled" in overrides:
+        base.pop("tavily_enabled", None)
     base.update(overrides)
     return Settings(**base)

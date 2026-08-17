@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from app.core.exceptions import (
+    AgentError,
     AppError,
     ConfigurationError,
     ProviderError,
@@ -90,3 +91,11 @@ def test_app_error_hierarchy() -> None:
     err = ProviderError("x", provider="huggingface")
     assert isinstance(err, AppError)
     assert err.status_code == 502
+
+
+def test_agent_error_is_safe_app_error() -> None:
+    err = AgentError("agent failed", details={"reason": "unknown_tool"})
+    assert isinstance(err, AppError)
+    assert err.code == "agent_error"
+    assert err.status_code == 500
+    assert err.details["reason"] == "unknown_tool"

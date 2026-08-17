@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "rag-foundation"
 version = "0.1.0"
-description = "Phase 1D-1E — Retrieval and Groq answer generation for Basic RAG"
+description = "Phase 3A — Agent foundation on top of Advanced RAG"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -21,6 +21,7 @@ dependencies = [
     "python-multipart>=0.0.12,<1.0.0",
     "pypdf>=5.1.0,<6.0.0",
     "python-docx>=1.1.2,<2.0.0",
+    "tavily-python>=0.5.0,<1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -88,5 +89,6 @@ module = [
     "huggingface_hub.*",
     "pypdf.*",
     "docx.*",
+    "tavily.*",
 ]
 ignore_missing_imports = true

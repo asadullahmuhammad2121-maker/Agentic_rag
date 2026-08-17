@@ -1,40 +1,39 @@
 # RAG Foundation
 
-Production-oriented retrieval-augmented generation (RAG) system built incrementally.
+Production-oriented retrieval-augmented generation (RAG) system with Advanced RAG and Agentic RAG layers.
 
 ## Project Overview
 
-This project evolves through three major stages:
-
 ```text
-Basic RAG
-    ↓
-Advanced RAG
-    ↓
-Agentic RAG
+Basic RAG → Advanced RAG → Agentic RAG
 ```
 
-**Current phase: Phase 1D–1E — Retrieval + Answer Generation**
+**Current phase: Phase 3F — Query decomposition / task planning**
 
-Basic RAG is complete:
+Advanced RAG pipeline:
 
 ```text
-Query → Embedding → Qdrant search → Context → Prompt → Groq → Answer + Citations
+Query → (optional rewrite / multi-query) → hybrid retrieval → context optimization → Groq → Answer + Citations
 ```
 
-API:
+Agentic RAG pipeline:
 
-- `POST /documents/upload` — ingest PDFs
-- `POST /query` — ask grounded questions
+```text
+Query → routing / planning → ToolRegistry (RAG, Tavily) → generation → Answer + Citations
+```
 
-Still out of scope:
+### API
 
-- Hybrid search / BM25 / reranking / query rewriting
-- Context compression / evaluation framework
-- Agentic RAG / web search / multi-agent workflows
-- PostgreSQL / SQLAlchemy / Alembic
+| Endpoint | Description |
+| --- | --- |
+| `POST /documents/upload` | Ingest documents |
+| `POST /query` | Advanced RAG (direct) |
+| `POST /agent/query` | Agent orchestrator (RAG + optional Tavily) |
+| `GET /health` | Overall health (always 200; reports degraded dependencies) |
+| `GET /ready` | Readiness probe (503 until Qdrant + keyword index are available) |
+| `GET /live` | Liveness probe |
 
-## Current Stack
+## Stack
 
 | Layer | Choice |
 | --- | --- |
@@ -43,6 +42,7 @@ Still out of scope:
 | LLM | Groq |
 | Embeddings | Hugging Face |
 | Vector DB | Qdrant |
+| Web search | Tavily (optional) |
 | Packaging | Docker / Docker Compose |
 | Quality | pytest, Ruff, mypy |
 
@@ -50,109 +50,203 @@ Still out of scope:
 
 ```text
 app/
-├── main.py                 # FastAPI entrypoint
+├── main.py                 # FastAPI entrypoint + lifespan
 ├── api/                    # HTTP routes + dependency injection
-├── core/                   # config, logging, exceptions
+├── core/                   # config, logging, exceptions, middleware
 ├── schemas/                # API response models
 ├── services/
-│   ├── llm/                # LLMService → GroqLLMService
-│   ├── embeddings/         # EmbeddingService → HuggingFaceEmbeddingService
-│   ├── chunking/           # ChunkingService
-│   ├── ingestion/          # PDF extraction + DocumentIngestionService
-│   ├── retrieval/          # RetrievalService
-│   └── rag/                # PromptBuilder + RAGService
-├── vector_store/           # VectorStore → QdrantVectorStore
-├── repositories/           # reserved for future SQL phase
-└── utils/                  # checksum + id helpers
+│   ├── llm/                # GroqLLMService
+│   ├── embeddings/         # HuggingFaceEmbeddingService
+│   ├── ingestion/          # DocumentIngestionService
+│   ├── retrieval/          # vector + BM25 hybrid retrieval
+│   ├── rag/                # RAGService
+│   └── agent/              # routing, planning, tools, AgentService
+├── vector_store/           # QdrantVectorStore
+└── utils/
 ```
 
-The application depends on abstractions, not concrete provider SDKs, so Groq, Hugging Face, or Qdrant can be swapped later without rewriting RAG business logic.
+## Production / Docker Architecture
 
-## Local Setup
-
-### 1. Clone / open the project
-
-```bash
-cd "untitled folder"   # or your clone path
+```text
+                    ┌─────────────────────────────┐
+                    │  gateway (nginx) :8000      │
+                    └──────────────┬──────────────┘
+                                   │
+              ┌────────────────────┼────────────────────┐
+              │                    │                    │
+        ┌─────▼─────┐        ┌─────▼─────┐        ┌─────▼─────┐
+        │  app #1   │        │  app #2   │        │  app #3   │
+        │ (stateless│        │ (stateless│        │ (stateless│
+        │  FastAPI) │        │  FastAPI) │        │  FastAPI) │
+        └─────┬─────┘        └─────┬─────┘        └─────┬─────┘
+              │                    │                    │
+              └────────────────────┼────────────────────┘
+                                   │
+              ┌────────────────────┴────────────────────┐
+              │                                         │
+        ┌─────▼─────┐                          ┌────────▼────────┐
+        │  Qdrant   │                          │ keyword_index   │
+        │  volume   │                          │ volume (BM25)   │
+        └───────────┘                          └─────────────────┘
 ```
 
-### 2. Create a virtual environment
+Each FastAPI replica is **stateless**. Shared state lives in:
+
+- **Qdrant** — vector storage (named volume `qdrant_storage`)
+- **BM25 keyword index** — JSON file on shared volume `keyword_index_data`
+
+The BM25 index uses file locking, atomic writes, and reload-on-read so multiple API replicas can safely share the same index volume.
+
+External provider calls (Groq, Hugging Face, Tavily) are made per request; no session state is stored in memory beyond process-local caches (embeddings, clients).
+
+## Local Development
+
+### 1. Virtual environment
 
 ```bash
+cd /path/to/agentic_rag
 python3.12 -m venv .venv
-source .venv/bin/activate
-```
-
-### 3. Install dependencies
-
-```bash
+source .venv/bin/activate   # or: .venv/bin/python -m ...
 pip install -e ".[dev]"
 ```
 
-### 4. Configure environment
+### 2. Environment
 
 ```bash
 cp .env.example .env
 ```
 
-Edit `.env` and set provider keys when you need them. Phase 1A does **not** call Groq or Hugging Face APIs for generation/embeddings yet; Qdrant connectivity is the main runtime dependency.
+Set at minimum:
 
-### 5. Start Qdrant
+- `GROQ_API_KEY`
+- `HUGGINGFACE_API_KEY`
+- `QDRANT_URL=http://localhost:6333`
+
+Optional for agent web search:
+
+- `TAVILY_ENABLED=true`
+- `TAVILY_API_KEY=...`
+
+### 3. Start Qdrant only
 
 ```bash
 docker compose up -d qdrant
 ```
 
-### 6. Start FastAPI
+### 4. Start FastAPI locally
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+.venv/bin/python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
-Health check:
+### 5. Health checks
 
 ```bash
-curl http://localhost:8000/health
+curl http://127.0.0.1:8001/live
+curl http://127.0.0.1:8001/ready
+curl http://127.0.0.1:8001/health
 ```
 
-### 7. Run tests
+### 6. API smoke test
 
 ```bash
-pytest
+# Upload
+curl -F "files=@sample.pdf" http://127.0.0.1:8001/documents/upload
+
+# RAG query
+curl -X POST http://127.0.0.1:8001/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is RAG?"}'
+
+# Agent query
+curl -X POST http://127.0.0.1:8001/agent/query \
+  -H "Content-Type: application/json" \
+  -d '{"query":"What is RAG?"}'
 ```
+
+## Docker Compose
+
+Secrets stay in `.env` on the host and are injected at runtime — they are **not** baked into the image.
+
+### Build and start (single replica)
+
+```bash
+docker compose up --build
+```
+
+The API is exposed through the **gateway** (default [http://localhost:8080](http://localhost:8080); override with `GATEWAY_PORT=8000`).
+
+### Horizontal scaling
+
+Scale stateless API containers behind the nginx gateway:
+
+```bash
+docker compose up --build --scale app=3
+```
+
+All replicas share:
+
+- Qdrant at `http://qdrant:6333`
+- BM25 index volume at `/app/data/keyword_index/index.json`
+
+Verify health through the gateway:
+
+```bash
+curl http://localhost:8080/ready
+curl http://localhost:8080/health
+```
+
+### Scaling notes
+
+| Topic | Behavior |
+| --- | --- |
+| `/query`, `/agent/query` | Safe to run on any replica (read-heavy) |
+| `/documents/upload` | Safe across replicas; BM25 writes are serialized with file locks |
+| Qdrant | Shared external service; handles concurrent reads/writes |
+| BM25 index | Shared JSON file with lock + atomic write + reload-on-read |
+| Process caches | Embedding/client caches are per-replica (acceptable) |
+| Sticky sessions | Not required |
+
+### Scaling limitations
+
+- BM25 updates are serialized — heavy concurrent upload load may queue on the index lock.
+- No distributed cache for embeddings — each replica maintains its own in-process cache.
+- Provider rate limits (Groq, Hugging Face, Tavily) apply across all replicas collectively.
+- Docker Compose scaling is suitable for development and small production deployments; larger deployments may need an external load balancer or orchestrator.
+
+## Environment Variables
+
+See [`.env.example`](.env.example) for the full list. Key production settings:
+
+| Variable | Purpose |
+| --- | --- |
+| `APP_ENV` | `development`, `staging`, `production`, `test` |
+| `GROQ_API_KEY` | Required in production |
+| `HUGGINGFACE_API_KEY` | Required in production |
+| `QDRANT_URL` | Qdrant HTTP endpoint |
+| `KEYWORD_INDEX_PATH` | BM25 index file path |
+| `REQUEST_TIMEOUT_SECONDS` | HTTP request timeout middleware |
+| `UVICORN_WORKERS` | Worker processes per container (default 1; prefer scaling containers) |
+| `TAVILY_ENABLED` | Enable web search tool |
+| `HYBRID_SEARCH_ENABLED` | Enable vector + BM25 hybrid retrieval |
 
 ## Development Commands
 
 ```bash
-# Application
-uvicorn app.main:app --reload --port 8000
-
 # Tests
 pytest
-pytest -m integration          # integration suite (Qdrant tests auto-skip if down)
+pytest -m integration
 pytest tests/unit -q
 
-# Lint
+# Lint / type check
 ruff check .
-ruff format .
-
-# Type check
 mypy app
 
-# Full stack (app + Qdrant)
+# Docker
+docker compose build
 docker compose up --build
+docker compose up --build --scale app=3
 ```
-
-## Roadmap (not implemented yet)
-
-| Phase | Focus |
-| --- | --- |
-| 1A | Foundation (complete) |
-| 1B | Document ingestion + PDF processing (complete) |
-| 1C | Chunking + embeddings (complete) |
-| 1D–1E | Retrieval + Groq generation + citations (current) |
-| 2 | Advanced RAG |
-| 3 | Agentic RAG |
 
 ## License
 

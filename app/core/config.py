@@ -3,7 +3,7 @@
 from functools import lru_cache
 from typing import Literal, Self
 
-from pydantic import Field, SecretStr, field_validator, model_validator
+from pydantic import AliasChoices, Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -30,8 +30,22 @@ class Settings(BaseSettings):
     )
 
     # HTTP / future ingestion limits
-    request_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+    request_timeout_seconds: float = Field(default=120.0, gt=0, le=600)
     max_upload_file_size_mb: int = Field(default=25, gt=0, le=500)
+    app_port: int = Field(default=8000, gt=0, le=65535)
+    uvicorn_workers: int = Field(
+        default=1,
+        ge=1,
+        le=16,
+        description="Number of Uvicorn worker processes per container",
+    )
+    uvicorn_timeout_keep_alive: int = Field(default=5, gt=0, le=120)
+    keyword_index_lock_timeout_seconds: float = Field(
+        default=30.0,
+        gt=0,
+        le=300,
+        description="Max seconds to wait for the BM25 index file lock",
+    )
 
     # Groq LLM — keys may be empty in Phase 1A (generation not implemented yet)
     groq_api_key: SecretStr = Field(default=SecretStr(""), description="Groq API key")
@@ -199,6 +213,53 @@ class Settings(BaseSettings):
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
     llm_max_tokens: int = Field(default=1024, gt=0, le=8192)
 
+    # Agent (Phase 3A / 3E)
+    agent_max_steps: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description="Maximum decide/act steps per agent run",
+    )
+    agent_routing_enabled: bool = Field(
+        default=True,
+        description="Use LLM routing to select agent tools",
+    )
+    agent_routing_max_tokens: int = Field(
+        default=256,
+        gt=0,
+        le=1024,
+        description="Maximum tokens for the routing LLM response",
+    )
+    agent_planning_enabled: bool = Field(
+        default=True,
+        description="Decompose hybrid queries into planned sub-tasks",
+    )
+    agent_planning_max_tokens: int = Field(
+        default=512,
+        gt=0,
+        le=2048,
+        description="Maximum tokens for the planning LLM response",
+    )
+
+    # Tavily web search (Phase 3D)
+    tavily_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("tavily_enabled", "web_search_enabled"),
+        description="Enable Tavily web search tool for the agent",
+    )
+    tavily_api_key: SecretStr = Field(default=SecretStr(""), description="Tavily API key")
+    tavily_max_results: int = Field(
+        default=5,
+        gt=0,
+        le=20,
+        description="Default maximum Tavily search results to return",
+    )
+    tavily_search_depth: Literal["basic", "advanced"] = Field(
+        default="basic",
+        description="Tavily search depth tradeoff",
+    )
+    tavily_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
+
     # Qdrant
     qdrant_url: str = Field(default="http://localhost:6333")
     qdrant_collection_name: str = Field(default="documents")
@@ -257,6 +318,11 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.app_env == "production"
+
+    @property
+    def tavily_configured(self) -> bool:
+        """Return whether Tavily is enabled and has an API key."""
+        return self.tavily_enabled and bool(self.tavily_api_key.get_secret_value().strip())
 
 
 @lru_cache

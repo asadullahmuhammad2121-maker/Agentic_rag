@@ -45,6 +45,14 @@ class RAGResult:
     citations: list[Citation]
 
 
+@dataclass(slots=True, frozen=True)
+class RetrievalContext:
+    """Retrieved and optionally optimized chunks ready for generation."""
+
+    query: str
+    chunks: list[RetrievedChunk]
+
+
 class RAGService:
     """Orchestrate Basic RAG: embed → retrieve → prompt → generate → format."""
 
@@ -70,6 +78,22 @@ class RAGService:
         top_k: int | None = None,
         filters: RetrievalFilters | None = None,
     ) -> RAGResult:
+        """Run the full Advanced RAG pipeline: retrieve → prompt → generate."""
+        context = self.retrieve_context(query, top_k=top_k, filters=filters)
+        return self.generate_from_chunks(context.query, context.chunks)
+
+    def retrieve_context(
+        self,
+        query: str,
+        *,
+        top_k: int | None = None,
+        filters: RetrievalFilters | None = None,
+    ) -> RetrievalContext:
+        """
+        Run the Advanced RAG retrieval pipeline without generation.
+
+        Applies optional query transformation, retrieval, and context optimization.
+        """
         normalized = query.strip()
         if not normalized:
             raise QueryError(
@@ -78,9 +102,9 @@ class RAGService:
             )
 
         logger.info(
-            "rag_query_started",
+            "rag_retrieval_started",
             extra={
-                "operation": "rag_answer",
+                "operation": "retrieve_context",
                 "query_length": len(normalized),
                 "top_k": top_k,
                 "has_filters": filters is not None and not filters.is_empty(),
@@ -95,7 +119,7 @@ class RAGService:
             logger.info(
                 "rag_query_transformation_applied",
                 extra={
-                    "operation": "rag_answer",
+                    "operation": "retrieve_context",
                     "was_transformed": transformed.was_transformed,
                     "original_query_length": len(transformed.original_query),
                     "retrieval_query_length": len(retrieval_query),
@@ -114,9 +138,9 @@ class RAGService:
         if not chunks:
             logger.info(
                 "rag_empty_retrieval",
-                extra={"operation": "rag_answer", "result_count": 0},
+                extra={"operation": "retrieve_context", "result_count": 0},
             )
-            return RAGResult(answer=EMPTY_RETRIEVAL_ANSWER, citations=[])
+            return RetrievalContext(query=normalized, chunks=[])
 
         if self._context_optimizer is not None:
             optimization = self._context_optimizer.optimize(chunks)
@@ -124,7 +148,7 @@ class RAGService:
             logger.info(
                 "rag_context_optimized",
                 extra={
-                    "operation": "rag_answer",
+                    "operation": "retrieve_context",
                     "removed_count": optimization.removed_count,
                     "estimated_tokens": optimization.estimated_tokens,
                     "result_count": len(chunks),
@@ -133,9 +157,43 @@ class RAGService:
             if not chunks:
                 logger.info(
                     "rag_empty_context_after_optimization",
-                    extra={"operation": "rag_answer", "result_count": 0},
+                    extra={"operation": "retrieve_context", "result_count": 0},
                 )
-                return RAGResult(answer=EMPTY_RETRIEVAL_ANSWER, citations=[])
+                return RetrievalContext(query=normalized, chunks=[])
+
+        logger.info(
+            "rag_retrieval_completed",
+            extra={
+                "operation": "retrieve_context",
+                "result_count": len(chunks),
+            },
+        )
+        return RetrievalContext(query=normalized, chunks=chunks)
+
+    def generate_from_chunks(self, query: str, chunks: list[RetrievedChunk]) -> RAGResult:
+        """Build a grounded prompt from retrieved chunks and generate an answer."""
+        normalized = query.strip()
+        if not normalized:
+            raise QueryError(
+                "Query must not be empty",
+                details={"reason": "empty_query"},
+            )
+
+        if not chunks:
+            logger.info(
+                "rag_generation_skipped_empty_context",
+                extra={"operation": "generate_from_chunks", "result_count": 0},
+            )
+            return RAGResult(answer=EMPTY_RETRIEVAL_ANSWER, citations=[])
+
+        logger.info(
+            "rag_generation_started",
+            extra={
+                "operation": "generate_from_chunks",
+                "query_length": len(normalized),
+                "result_count": len(chunks),
+            },
+        )
 
         prompt = self._prompt_builder.build(normalized, chunks)
         try:
@@ -148,9 +206,9 @@ class RAGService:
 
         citations = self._build_citations(chunks)
         logger.info(
-            "rag_query_completed",
+            "rag_generation_completed",
             extra={
-                "operation": "rag_answer",
+                "operation": "generate_from_chunks",
                 "result_count": len(chunks),
                 "citation_count": len(citations),
                 "answer_length": len(answer_text),

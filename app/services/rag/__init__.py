@@ -1,7 +1,7 @@
 """RAG services."""
 
 from app.services.rag.prompt_builder import BuiltPrompt, PromptBuilder
-from app.services.rag.service import Citation, RAGResult, RAGService
+from app.services.rag.service import Citation, RAGResult, RetrievalContext
 
 __all__ = [
     "BuiltPrompt",
@@ -9,4 +9,5 @@ __all__ = [
     "PromptBuilder",
     "RAGResult",
     "RAGService",
+    "RetrievalContext",
 ]

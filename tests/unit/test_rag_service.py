@@ -94,3 +94,66 @@ def test_qdrant_failure_propagates(rag: RAGService, retrieval: MagicMock) -> Non
     retrieval.retrieve.side_effect = QdrantConnectionError()
     with pytest.raises(QdrantConnectionError):
         rag.answer("q")
+
+
+def test_retrieve_context_returns_chunks_without_generation(
+    rag: RAGService,
+    retrieval: MagicMock,
+    llm: MagicMock,
+) -> None:
+    retrieval.retrieve.return_value = [
+        RetrievedChunk(
+            chunk_id="c1",
+            text="context",
+            document_id="d",
+            filename="f.pdf",
+            file_type="pdf",
+            source="f.pdf",
+            page_number=1,
+            section=None,
+            chunk_index=0,
+            chunking_strategy="fixed",
+            score=0.5,
+        )
+    ]
+
+    context = rag.retrieve_context("What is this?")
+
+    assert context.query == "What is this?"
+    assert len(context.chunks) == 1
+    llm.generate.assert_not_called()
+
+
+def test_generate_from_chunks_builds_answer_and_citations(
+    rag: RAGService,
+    llm: MagicMock,
+) -> None:
+    chunks = [
+        RetrievedChunk(
+            chunk_id="c1",
+            text="Cats are mammals.",
+            document_id="doc-1",
+            filename="animals.pdf",
+            file_type="pdf",
+            source="animals.pdf",
+            page_number=1,
+            section=None,
+            chunk_index=0,
+            chunking_strategy="fixed",
+            score=0.95,
+        )
+    ]
+
+    result = rag.generate_from_chunks("What are cats?", chunks)
+
+    assert "Cats are mammals" in result.answer
+    assert len(result.citations) == 1
+    assert result.citations[0].label == "S1"
+    llm.generate.assert_called_once()
+
+
+def test_generate_from_chunks_empty_context_skips_llm(rag: RAGService, llm: MagicMock) -> None:
+    result = rag.generate_from_chunks("unknown", [])
+    assert result.answer == EMPTY_RETRIEVAL_ANSWER
+    assert result.citations == []
+    llm.generate.assert_not_called()

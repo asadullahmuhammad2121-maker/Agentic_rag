@@ -139,6 +139,18 @@ class QueryError(AppError):
         )
 
 
+class AgentError(AppError):
+    """Raised when the agent orchestrator cannot complete a run."""
+
+    def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
+        super().__init__(
+            message,
+            code="agent_error",
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            details=details,
+        )
+
+
 class ErrorResponse(BaseModel):
     """Safe API error payload — never includes secrets or stack traces."""
 

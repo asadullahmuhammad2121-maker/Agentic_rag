@@ -17,6 +17,7 @@ _SENSITIVE_KEYS = frozenset(
         "authorization",
         "groq_api_key",
         "huggingface_api_key",
+        "tavily_api_key",
         "prompt",
         "system_prompt",
         "user_prompt",

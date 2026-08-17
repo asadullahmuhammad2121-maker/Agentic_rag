@@ -2,10 +2,12 @@
 
 from fastapi import APIRouter
 
-from app.api.routes import agent, documents, health, query
+from app.api.routes import agent, documents, health, query, retrieval, settings
 
 api_router = APIRouter()
 api_router.include_router(health.router)
 api_router.include_router(documents.router)
 api_router.include_router(query.router)
+api_router.include_router(retrieval.router)
 api_router.include_router(agent.router)
+api_router.include_router(settings.router)

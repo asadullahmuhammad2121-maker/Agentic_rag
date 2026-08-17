@@ -24,8 +24,8 @@ from app.services.agent.models import (
     ToolResult,
     WebSearchResultItem,
 )
-from app.services.agent.routing.fallback import route_with_fallback
 from app.services.agent.planning.planner import QueryPlanner
+from app.services.agent.routing.fallback import route_with_fallback
 from app.services.agent.routing.router import QueryRouter
 from app.services.agent.service import AgentService
 from app.services.agent.tools.base import Tool

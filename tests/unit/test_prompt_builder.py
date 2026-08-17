@@ -42,3 +42,39 @@ def test_prompt_construction_handles_empty_context() -> None:
     assert "No relevant context" in built.user_prompt
     assert "do not have enough information" in built.user_prompt.lower()
     assert built.context_chunk_count == 0
+
+
+def test_combined_prompt_preserves_source_labels_across_sections() -> None:
+    chunks = [
+        RetrievedChunk(
+            chunk_id="doc-1:00000",
+            text="Document chunk",
+            document_id="doc-1",
+            filename="guide.pdf",
+            file_type="pdf",
+            source="guide.pdf",
+            page_number=1,
+            section=None,
+            chunk_index=0,
+            chunking_strategy="fixed",
+            score=0.9,
+        ),
+        RetrievedChunk(
+            chunk_id="https://example.com/news",
+            text="Web chunk",
+            document_id="https://example.com/news",
+            filename="News",
+            file_type="web",
+            source="https://example.com/news",
+            page_number=0,
+            section=None,
+            chunk_index=1,
+            chunking_strategy="web",
+            score=0.8,
+        ),
+    ]
+    built = PromptBuilder().build_combined("Compare docs and web", chunks)
+    assert "[S1]" in built.user_prompt
+    assert "[S2]" in built.user_prompt
+    assert "guide.pdf" in built.user_prompt
+    assert "https://example.com/news" in built.user_prompt

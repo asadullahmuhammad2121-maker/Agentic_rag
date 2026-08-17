@@ -95,12 +95,31 @@ class GroqLLMService(LLMService):
         )
 
         try:
-            completion = self._client.chat.completions.create(
-                model=self._model,
+            completion = self._create_completion(
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
+                max_completion_tokens=max_tokens,
             )
+            content, finish_reason = self._extract_message_content(completion)
+            if (not content or not content.strip()) and finish_reason == "length":
+                retry_tokens = min(max_tokens * 2, 8192)
+                logger.warning(
+                    "groq_empty_content_retry",
+                    extra={
+                        "operation": "generate",
+                        "provider": "groq",
+                        "model": self._model,
+                        "finish_reason": finish_reason,
+                        "original_max_completion_tokens": max_tokens,
+                        "retry_max_completion_tokens": retry_tokens,
+                    },
+                )
+                completion = self._create_completion(
+                    messages=messages,
+                    temperature=temperature,
+                    max_completion_tokens=retry_tokens,
+                )
+                content, finish_reason = self._extract_message_content(completion)
         except APITimeoutError as exc:
             logger.error(
                 "groq_generation_timeout",
@@ -140,8 +159,16 @@ class GroqLLMService(LLMService):
                     "status_code": status_code,
                 },
             )
+            if status_code == 429:
+                message = "Groq rate limit exceeded — retry shortly or switch models"
+            elif status_code == 401:
+                message = "Groq API key is invalid or missing"
+            elif status_code == 404:
+                message = "Groq model not found or deprecated — update GROQ_MODEL"
+            else:
+                message = "Groq API request failed"
             raise ProviderError(
-                "Groq API request failed",
+                message,
                 provider="groq",
                 details={
                     "reason": "api_error",
@@ -163,20 +190,14 @@ class GroqLLMService(LLMService):
                 details={"reason": "unexpected_error", "error_type": type(exc).__name__},
             ) from exc
 
-        try:
-            content = completion.choices[0].message.content
-        except (AttributeError, IndexError, TypeError) as exc:
-            raise ProviderError(
-                "Groq returned an empty response",
-                provider="groq",
-                details={"reason": "empty_response"},
-            ) from exc
-
         if not content or not str(content).strip():
             raise ProviderError(
-                "Groq returned an empty response",
+                "Groq returned an empty response (completion token budget exhausted)",
                 provider="groq",
-                details={"reason": "empty_response"},
+                details={
+                    "reason": "empty_response",
+                    "finish_reason": finish_reason,
+                },
             )
 
         answer = str(content).strip()
@@ -190,3 +211,32 @@ class GroqLLMService(LLMService):
             },
         )
         return answer
+
+    def _is_reasoning_model(self) -> bool:
+        return "gpt-oss" in self._model
+
+    def _create_completion(
+        self,
+        *,
+        messages: list[ChatCompletionMessageParam],
+        temperature: float,
+        max_completion_tokens: int,
+    ) -> Any:
+        request_kwargs: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": temperature,
+            "max_completion_tokens": max_completion_tokens,
+        }
+        if self._is_reasoning_model():
+            request_kwargs["reasoning_effort"] = "low"
+        return self._client.chat.completions.create(**request_kwargs)
+
+    @staticmethod
+    def _extract_message_content(completion: Any) -> tuple[str | None, str | None]:
+        choice = completion.choices[0]
+        content = choice.message.content
+        finish_reason = getattr(choice, "finish_reason", None)
+        if content is None:
+            return None, finish_reason
+        return str(content), finish_reason

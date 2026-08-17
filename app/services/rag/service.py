@@ -195,7 +195,11 @@ class RAGService:
             },
         )
 
-        prompt = self._prompt_builder.build(normalized, chunks)
+        prompt = (
+            self._prompt_builder.build_combined(normalized, chunks)
+            if any(chunk.file_type == "web" for chunk in chunks)
+            else self._prompt_builder.build(normalized, chunks)
+        )
         try:
             answer_text = self._llm.generate(
                 prompt.user_prompt,

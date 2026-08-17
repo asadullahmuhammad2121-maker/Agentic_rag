@@ -19,7 +19,12 @@ def test_health_endpoint_ok(client: TestClient) -> None:
     assert body["version"]
     assert body["environment"] == "test"
     assert any(c["name"] == "qdrant" and c["status"] == "ok" for c in body["components"])
-    assert any(c["name"] == "keyword_index" and c["status"] == "ok" for c in body["components"])
+    keyword = next(c for c in body["components"] if c["name"] == "keyword_index")
+    assert keyword["status"] == "ok"
+    assert "metadata" in keyword
+    assert isinstance(keyword["metadata"]["chunk_count"], int)
+    assert isinstance(keyword["metadata"]["hybrid_search_enabled"], bool)
+    assert isinstance(keyword["metadata"]["index_path"], str)
 
 
 def test_liveness_probe_ok(client: TestClient) -> None:

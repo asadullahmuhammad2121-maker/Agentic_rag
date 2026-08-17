@@ -7,7 +7,7 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi.testclient import TestClient
 
-from app.api.deps import get_agent_service, get_rag_service
+from app.api.deps import get_agent_run_store, get_agent_service, get_rag_service
 from app.core.exceptions import ProviderError, QdrantConnectionError, QueryError
 from app.main import create_app
 from app.services.agent.models import (
@@ -18,12 +18,14 @@ from app.services.agent.models import (
     AgentRunResult,
     AgentStep,
 )
+from app.services.agent.runs.store import AgentRunStore
 from app.services.rag.service import RAGResult
 
 
 @pytest.fixture
-def agent_client() -> TestClient:
+def agent_client(tmp_path) -> TestClient:
     application = create_app()
+    store = AgentRunStore(tmp_path / "agent_runs.db")
     mock_agent = MagicMock()
     mock_agent.run.return_value = AgentRunResult(
         answer="Agent answer",
@@ -62,6 +64,7 @@ def agent_client() -> TestClient:
         metadata={"step_count": 1, "finished": True},
     )
     application.dependency_overrides[get_agent_service] = lambda: mock_agent
+    application.dependency_overrides[get_agent_run_store] = lambda: store
     client = TestClient(application)
     client.mock_agent = mock_agent  # type: ignore[attr-defined]
     yield client

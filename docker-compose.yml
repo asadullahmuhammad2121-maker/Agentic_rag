@@ -24,6 +24,10 @@ services:
       APP_ENV: ${APP_ENV:-production}
       QDRANT_URL: http://qdrant:6333
       KEYWORD_INDEX_PATH: /app/data/keyword_index/index.json
+      HYBRID_SEARCH_ENABLED: ${HYBRID_SEARCH_ENABLED:-true}
+      VECTOR_SEARCH_WEIGHT: ${VECTOR_SEARCH_WEIGHT:-0.5}
+      KEYWORD_SEARCH_WEIGHT: ${KEYWORD_SEARCH_WEIGHT:-0.5}
+      HYBRID_TOP_K: ${HYBRID_TOP_K:-10}
       APP_PORT: 8000
       UVICORN_WORKERS: ${UVICORN_WORKERS:-1}
     volumes:
@@ -56,6 +60,36 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: /backend
+        API_URL: http://gateway:80
+    ports:
+      - "${FRONTEND_PORT:-3000}:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      HOSTNAME: 0.0.0.0
+      NEXT_PUBLIC_API_URL: /backend
+      API_URL: http://gateway:80
+    depends_on:
+      gateway:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
 volumes:

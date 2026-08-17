@@ -1,0 +1,2 @@
+The Zephyr Protocol uses exact keyword BM25 retrieval for hybrid search verification.
+Unique token: XKCD-9917-alpha-hybrid-test-marker.

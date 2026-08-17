@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Groq LLM — keys may be empty in Phase 1A (generation not implemented yet)
     groq_api_key: SecretStr = Field(default=SecretStr(""), description="Groq API key")
-    groq_model: str = Field(default="llama-3.3-70b-versatile")
+    groq_model: str = Field(default="openai/gpt-oss-20b")
     groq_timeout_seconds: float = Field(default=60.0, gt=0, le=600)
 
     # Hugging Face embeddings — keys may be empty in Phase 1A
@@ -211,7 +211,7 @@ class Settings(BaseSettings):
 
     # LLM generation (Phase 1E)
     llm_temperature: float = Field(default=0.1, ge=0.0, le=2.0)
-    llm_max_tokens: int = Field(default=1024, gt=0, le=8192)
+    llm_max_tokens: int = Field(default=2048, gt=0, le=8192)
 
     # Agent (Phase 3A / 3E)
     agent_max_steps: int = Field(
@@ -239,6 +239,16 @@ class Settings(BaseSettings):
         gt=0,
         le=2048,
         description="Maximum tokens for the planning LLM response",
+    )
+    agent_runs_db_path: str = Field(
+        default="data/agent_runs.db",
+        description="SQLite database path for persisted agent run history",
+    )
+    agent_runs_default_page_size: int = Field(
+        default=20,
+        gt=0,
+        le=100,
+        description="Default page size for GET /agent/runs",
     )
 
     # Tavily web search (Phase 3D)

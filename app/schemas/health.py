@@ -1,6 +1,6 @@
 """Health check response schemas."""
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -11,6 +11,7 @@ class ComponentHealth(BaseModel):
     name: str
     status: Literal["ok", "degraded", "unavailable"]
     detail: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class HealthResponse(BaseModel):

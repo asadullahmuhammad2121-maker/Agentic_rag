@@ -54,3 +54,7 @@ def test_keyword_index_health_check(tmp_path: Path) -> None:
     index_path = tmp_path / "nested" / "index.json"
     search = BM25KeywordSearch(index_path)
     assert search.health_check() is True
+    assert search.chunk_count == 0
+
+    search.index_records([_record(chunk_id="c1", text="count me in")])
+    assert search.chunk_count == 1

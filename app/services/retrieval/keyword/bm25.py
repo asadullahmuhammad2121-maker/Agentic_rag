@@ -100,6 +100,17 @@ class BM25KeywordSearch(KeywordSearch):
         except OSError:
             return False
 
+    @property
+    def chunk_count(self) -> int:
+        """Return the number of chunks currently loaded in the BM25 index."""
+        with index_file_lock(
+            self._lock_path,
+            exclusive=False,
+            timeout_seconds=self._lock_timeout_seconds,
+        ):
+            self._reload_if_changed()
+            return len(self._chunks)
+
     def index_records(self, records: list[VectorRecord]) -> None:
         if not records:
             return

@@ -8,9 +8,9 @@ from uuid import uuid4
 import pytest
 
 from app.core.exceptions import QdrantConnectionError, VectorStoreError
+from app.utils.ids import normalize_point_id
 from app.vector_store.base import VectorRecord
 from app.vector_store.filters import PayloadFilter
-from app.utils.ids import normalize_point_id
 from app.vector_store.qdrant import QdrantVectorStore
 from tests.conftest import make_settings
 

@@ -7,14 +7,12 @@ import asyncio
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 from starlette.responses import JSONResponse, Response
+from starlette.types import ASGIApp
 
 from app.core.config import Settings
 from app.core.logging import get_logger
 
 logger = get_logger(__name__)
-
-
-from starlette.types import ASGIApp
 
 
 class RequestTimeoutMiddleware(BaseHTTPMiddleware):

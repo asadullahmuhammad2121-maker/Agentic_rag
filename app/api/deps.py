@@ -13,6 +13,7 @@ from app.services.agent.foundation import FoundationAgent
 from app.services.agent.generation.web import WebAnswerGenerator
 from app.services.agent.planning.planner import QueryPlanner
 from app.services.agent.routing.router import QueryRouter
+from app.services.agent.runs.store import AgentRunStore
 from app.services.agent.service import AgentService
 from app.services.agent.tools.base import Tool
 from app.services.agent.tools.rag import RAGRetrievalTool
@@ -25,9 +26,10 @@ from app.services.llm.base import LLMService
 from app.services.llm.groq import GroqLLMService
 from app.services.query_transformation.service import QueryTransformationService
 from app.services.rag.service import RAGService
+from app.services.retrieval.explorer import RetrievalExplorerService
 from app.services.retrieval.hybrid import HybridRetrievalService
 from app.services.retrieval.keyword.bm25 import BM25KeywordSearch
-from app.services.retrieval.multi_query import MultiQueryRetrievalService
+from app.services.retrieval.multi_query import MultiQueryGenerator, MultiQueryRetrievalService
 from app.services.retrieval.service import RetrievalService
 from app.vector_store.base import VectorStore
 from app.vector_store.qdrant import QdrantVectorStore
@@ -154,6 +156,45 @@ def get_rag_service(
     )
 
 
+def get_retrieval_explorer_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    retrieval_service: Annotated[RetrievalService, Depends(get_retrieval_service)],
+    hybrid_retrieval: Annotated[HybridRetrievalService, Depends(get_hybrid_retrieval_service)],
+    keyword_search: Annotated[BM25KeywordSearch, Depends(get_keyword_search)],
+    multi_query_retrieval: Annotated[
+        MultiQueryRetrievalService,
+        Depends(get_multi_query_retrieval_service),
+    ],
+    query_transformer: Annotated[
+        QueryTransformationService,
+        Depends(get_query_transformation_service),
+    ],
+    llm_service: Annotated[LLMService, Depends(get_llm_service)],
+    context_optimizer: Annotated[
+        ContextOptimizationService,
+        Depends(get_context_optimizer),
+    ],
+) -> RetrievalExplorerService:
+    """Provide the retrieval explorer service."""
+    transformer = query_transformer if settings.query_transformation_enabled else None
+    generator = (
+        MultiQueryGenerator(settings, llm_service)
+        if settings.multi_query_enabled
+        else None
+    )
+    optimizer = context_optimizer if settings.context_optimization_enabled else None
+    return RetrievalExplorerService(
+        settings=settings,
+        vector_retrieval=retrieval_service,
+        hybrid_retrieval=hybrid_retrieval,
+        keyword_search=keyword_search,
+        multi_query_retrieval=multi_query_retrieval,
+        query_transformer=transformer,
+        multi_query_generator=generator,
+        context_optimizer=optimizer,
+    )
+
+
 def get_rag_retrieval_tool(
     rag_service: Annotated[RAGService, Depends(get_rag_service)],
 ) -> RAGRetrievalTool:
@@ -216,6 +257,13 @@ def get_agent(
     return FoundationAgent(router, planner, settings)
 
 
+def get_agent_run_store(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> AgentRunStore:
+    """Provide SQLite-backed agent run history storage."""
+    return AgentRunStore(settings.agent_runs_db_path)
+
+
 def get_agent_service(
     settings: Annotated[Settings, Depends(get_settings)],
     agent: Annotated[Agent, Depends(get_agent)],
@@ -248,5 +296,11 @@ VectorStoreDep = Annotated[VectorStore, Depends(get_vector_store)]
 KeywordSearchDep = Annotated[BM25KeywordSearch, Depends(get_keyword_search)]
 IngestionServiceDep = Annotated[DocumentIngestionService, Depends(get_ingestion_service)]
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
+RetrievalExplorerServiceDep = Annotated[
+    RetrievalExplorerService,
+    Depends(get_retrieval_explorer_service),
+]
 RAGServiceDep = Annotated[RAGService, Depends(get_rag_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
+AgentRunStoreDep = Annotated[AgentRunStore, Depends(get_agent_run_store)]
+ToolRegistryDep = Annotated[ToolRegistry, Depends(get_tool_registry)]

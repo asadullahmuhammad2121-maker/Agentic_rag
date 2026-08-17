@@ -18,9 +18,16 @@ router = APIRouter(tags=["health"])
 def _component_statuses(
     vector_store: VectorStoreDep,
     keyword_search: KeywordSearchDep,
+    settings: SettingsDep,
 ) -> tuple[list[ComponentHealth], bool, bool]:
     qdrant_ok = vector_store.health_check()
     keyword_ok = keyword_search.health_check()
+    keyword_chunks = keyword_search.chunk_count if keyword_ok else 0
+    keyword_detail: str | None = None
+    if not keyword_ok:
+        keyword_detail = "Keyword index path is unavailable"
+    elif keyword_chunks == 0:
+        keyword_detail = "Index empty — upload documents to populate BM25"
     components = [
         ComponentHealth(
             name="qdrant",
@@ -30,7 +37,12 @@ def _component_statuses(
         ComponentHealth(
             name="keyword_index",
             status="ok" if keyword_ok else "unavailable",
-            detail=None if keyword_ok else "Keyword index path is unavailable",
+            detail=keyword_detail,
+            metadata={
+                "chunk_count": keyword_chunks,
+                "hybrid_search_enabled": settings.hybrid_search_enabled,
+                "index_path": settings.keyword_index_path,
+            },
         ),
     ]
     return components, qdrant_ok, keyword_ok
@@ -58,7 +70,11 @@ def health_check(
     keyword_search: KeywordSearchDep,
 ) -> HealthResponse:
     """Return application health and dependency connectivity status."""
-    components, qdrant_ok, keyword_ok = _component_statuses(vector_store, keyword_search)
+    components, qdrant_ok, keyword_ok = _component_statuses(
+        vector_store,
+        keyword_search,
+        settings,
+    )
     if qdrant_ok and keyword_ok:
         overall: Literal["ok", "degraded", "unavailable"] = "ok"
     elif qdrant_ok or keyword_ok:
@@ -97,7 +113,11 @@ def readiness_probe(
     keyword_search: KeywordSearchDep,
 ) -> HealthResponse:
     """Return 200 only when required dependencies are reachable."""
-    components, qdrant_ok, keyword_ok = _component_statuses(vector_store, keyword_search)
+    components, qdrant_ok, keyword_ok = _component_statuses(
+        vector_store,
+        keyword_search,
+        settings,
+    )
     ready = qdrant_ok and keyword_ok
     overall: Literal["ok", "degraded", "unavailable"] = "ok" if ready else "unavailable"
     if not ready:

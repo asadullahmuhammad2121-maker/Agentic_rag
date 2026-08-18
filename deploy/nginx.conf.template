@@ -1,15 +1,10 @@
-# Static nginx config for local reference only.
-# Docker Compose and Railway use deploy/nginx.conf.template rendered at container start
-# by deploy/gateway-entrypoint.sh (see deploy/Dockerfile.gateway).
-#
-# Defaults: listen 80, upstream app:8000
-
 upstream rag_api {
-    server app:8000;
+    # Docker Compose: app:8000. Railway: set BACKEND_UPSTREAM to private backend host:port.
+    server __BACKEND_UPSTREAM__;
 }
 
 server {
-    listen 80;
+    listen __LISTEN_PORT__;
     server_name _;
 
     client_max_body_size 50m;

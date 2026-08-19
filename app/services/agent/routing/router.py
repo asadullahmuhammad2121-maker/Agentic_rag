@@ -11,6 +11,7 @@ from app.core.config import Settings
 from app.core.exceptions import AgentError, AppError
 from app.core.logging import get_logger
 from app.services.agent.models import AgentRequest, RoutingDecision, RoutingDecisionOutput
+from app.services.agent.routing.calculation import enrich_calculation_tool_selection
 from app.services.agent.routing.fallback import enrich_hybrid_tool_selection, route_with_fallback
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
@@ -24,7 +25,9 @@ ROUTING_SYSTEM_PROMPT = (
     "Return valid JSON with keys 'tools' (array of tool names) and optional 'reasoning'. "
     "Select rag_retrieval when the answer should come from uploaded/internal documents. "
     "Select tavily_web_search when the answer needs current or external web information. "
+    "Select calculator when the query requires arithmetic, percentages, averages, or numeric computation. "
     "Select both when the question needs internal document context and current web information. "
+    "Select rag_retrieval and calculator when a document-derived value must be calculated. "
     "Do not invent tool names."
 )
 
@@ -115,6 +118,11 @@ class QueryRouter:
         ):
             validated_tools.insert(0, RAG_RETRIEVAL_TOOL_NAME)
         validated_tools = enrich_hybrid_tool_selection(
+            validated_tools,
+            request.query,
+            tools,
+        )
+        validated_tools = enrich_calculation_tool_selection(
             validated_tools,
             request.query,
             tools,

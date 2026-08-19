@@ -143,6 +143,68 @@ def main() -> int:
     empty_code, _ = req("POST", f"{BASE}/agent/query", {"query": "   "})
     record("Routing", "Empty query rejected", "4xx", str(empty_code), empty_code >= 400)
 
+    # 7b Calculator
+    _, calc_only = req("POST", f"{BASE}/agent/query", {"query": "What is 17.5% of 84000?"})
+    calc_answer = (calc_only.get("answer") or "").replace(",", "")
+    record(
+        "Calculator",
+        "17.5% of 84000",
+        "14700",
+        calc_answer[:80],
+        "14700" in calc_answer and calc_only.get("tool_used") == "calculator",
+    )
+    _, calc_expr = req("POST", f"{BASE}/agent/query", {"query": "Calculate (125 * 48) + 300."})
+    expr_answer = (calc_expr.get("answer") or "").replace(",", "")
+    record(
+        "Calculator",
+        "(125 * 48) + 300",
+        "6300",
+        expr_answer[:80],
+        "6300" in expr_answer and calc_expr.get("tool_used") == "calculator",
+    )
+
+    calc_fixture = Path("tests/fixtures/calculator_metric_test.txt")
+    up_calc_code, up_calc = upload_file(calc_fixture)
+    record(
+        "Calculator",
+        "Upload calculator fixture",
+        "201/duplicate",
+        f"{up_calc_code}/{up_calc.get('status') or up_calc.get('error')}",
+        up_calc_code in (200, 201) or up_calc.get("error") == "duplicate_document",
+    )
+    _, rag_calc = req(
+        "POST",
+        f"{BASE}/agent/query",
+        {
+            "query": (
+                "According to my uploaded document, what revenue value is mentioned, "
+                "and what would that value be after a 15% increase?"
+            )
+        },
+        timeout=180,
+    )
+    rag_calc_tools = rag_calc.get("tool_used") or ""
+    record(
+        "Calculator",
+        "RAG + calculator hybrid",
+        "rag+calculator",
+        rag_calc_tools,
+        "rag_retrieval" in rag_calc_tools and "calculator" in rag_calc_tools and bool(rag_calc.get("answer")),
+    )
+
+    _, settings_calc = req("GET", f"{BASE}/settings")
+    calc_tool = next(
+        (t for t in (settings_calc.get("agent", {}).get("tools") or []) if t.get("name") == "calculator"),
+        {},
+    )
+    record(
+        "Calculator",
+        "Settings lists calculator tool",
+        "available",
+        str(calc_tool.get("available")),
+        calc_tool.get("available") is True,
+    )
+
     # 8 Planning — inspect run detail for hybrid query
     time.sleep(0.5)
     _, runs = req("GET", f"{BASE}/agent/runs?limit=1")

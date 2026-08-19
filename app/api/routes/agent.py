@@ -222,10 +222,15 @@ def _to_response(result: AgentRunResult) -> AgentQueryResponse:
 def _to_step_response(step: AgentStep) -> AgentStepResponse:
     observation = None
     if step.observation is not None:
+        metadata = step.observation.metadata
+        expression = metadata.get("expression")
+        result = metadata.get("result")
         observation = AgentObservationResponse(
             tool_name=step.observation.tool_name,
             success=step.observation.success,
             citation_count=len(step.observation.citations),
+            expression=expression if isinstance(expression, str) else None,
+            result=float(result) if isinstance(result, (int, float)) else None,
         )
     if step.action.type is AgentActionType.FINISH:
         action_type = "finish"

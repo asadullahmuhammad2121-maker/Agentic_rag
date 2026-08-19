@@ -28,6 +28,8 @@ class AgentObservationResponse(BaseModel):
     tool_name: str
     success: bool
     citation_count: int = 0
+    expression: str | None = None
+    result: float | None = None
 
 
 class AgentStepResponse(BaseModel):

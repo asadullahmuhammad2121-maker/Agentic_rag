@@ -1,0 +1,6 @@
+Financial Summary — Q4 Report
+
+Total revenue for the quarter was $2,400,000 (2.4 million USD).
+Operating expenses were $1,800,000.
+
+This document is used for calculator integration testing.

@@ -11,6 +11,7 @@ from app.schemas.settings import (
     SearchSettingsResponse,
     ToolStatusResponse,
 )
+from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME
@@ -18,6 +19,7 @@ from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME
 _TOOL_LABELS = {
     RAG_RETRIEVAL_TOOL_NAME: "RAG Retrieval",
     TAVILY_WEB_SEARCH_TOOL_NAME: "Tavily Web Search",
+    CALCULATOR_TOOL_NAME: "Calculator",
 }
 
 
@@ -38,6 +40,13 @@ def build_public_settings(settings: Settings, tools: ToolRegistry) -> PublicSett
             enabled=settings.tavily_enabled,
             configured=settings.tavily_configured,
             available=TAVILY_WEB_SEARCH_TOOL_NAME in registered,
+        ),
+        ToolStatusResponse(
+            name=CALCULATOR_TOOL_NAME,
+            label=_TOOL_LABELS[CALCULATOR_TOOL_NAME],
+            enabled=settings.calculator_enabled,
+            configured=True,
+            available=CALCULATOR_TOOL_NAME in registered,
         ),
     ]
 

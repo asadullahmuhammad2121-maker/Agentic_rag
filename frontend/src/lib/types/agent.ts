@@ -22,6 +22,8 @@ export interface AgentObservationResponse {
   tool_name: string;
   success: boolean;
   citation_count: number;
+  expression?: string | null;
+  result?: number | null;
 }
 
 export interface AgentStepResponse {

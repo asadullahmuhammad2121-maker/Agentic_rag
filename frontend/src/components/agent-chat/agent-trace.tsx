@@ -2,7 +2,7 @@
 
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { AgentQueryResponse, AgentStepResponse } from "@/lib/types/agent";
-import { formatActionType, formatToolLabel } from "@/lib/utils";
+import { formatActionType, formatCalculatorResult, formatToolLabel } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
   Collapsible,
@@ -21,6 +21,7 @@ interface AgentTraceProps {
 function toolDisplayName(toolName: string): string {
   if (toolName === "rag_retrieval") return "RAG Retrieval";
   if (toolName === "tavily_web_search") return "Tavily Web Search";
+  if (toolName === "calculator") return "Calculator";
   return toolName;
 }
 
@@ -50,9 +51,18 @@ function renderStep(step: AgentStepResponse, index: number) {
         <div className="mt-3 text-sm text-slate-600">
           <p>
             Observation: {toolDisplayName(observation.tool_name)} —{" "}
-            {observation.success ? "success" : "failed"} ·{" "}
-            {observation.citation_count} citation(s)
+            {observation.success ? "success" : "failed"}
+            {observation.tool_name !== "calculator" ? (
+              <> · {observation.citation_count} citation(s)</>
+            ) : null}
           </p>
+          {observation.tool_name === "calculator" &&
+          observation.success &&
+          observation.expression ? (
+            <p className="mt-1 font-mono text-xs text-slate-700">
+              {observation.expression} = {formatCalculatorResult(observation.result ?? null)}
+            </p>
+          ) : null}
         </div>
       ) : null}
     </div>

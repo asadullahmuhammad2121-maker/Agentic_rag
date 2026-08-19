@@ -16,6 +16,7 @@ from app.services.agent.routing.router import QueryRouter
 from app.services.agent.runs.store import AgentRunStore
 from app.services.agent.service import AgentService
 from app.services.agent.tools.base import Tool
+from app.services.agent.tools.calculator import CalculatorTool
 from app.services.agent.tools.rag import RAGRetrievalTool
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.context_optimization.service import ContextOptimizationService
@@ -213,14 +214,26 @@ def get_tavily_web_search_tool(
     return TavilyWebSearchTool(settings)
 
 
+def get_calculator_tool(
+    settings: Annotated[Settings, Depends(get_settings)],
+) -> Tool | None:
+    """Provide the calculator tool when enabled."""
+    if not settings.calculator_enabled:
+        return None
+    return CalculatorTool(settings)
+
+
 def get_tool_registry(
     rag_tool: Annotated[RAGRetrievalTool, Depends(get_rag_retrieval_tool)],
     tavily_tool: Annotated[Tool | None, Depends(get_tavily_web_search_tool)],
+    calculator_tool: Annotated[Tool | None, Depends(get_calculator_tool)],
 ) -> ToolRegistry:
-    """Provide the agent tool registry (RAG plus optional Tavily)."""
+    """Provide the agent tool registry (RAG plus optional Tavily and calculator)."""
     tools: list[Tool] = [rag_tool]
     if tavily_tool is not None:
         tools.append(tavily_tool)
+    if calculator_tool is not None:
+        tools.append(calculator_tool)
     return ToolRegistry(tools)
 
 

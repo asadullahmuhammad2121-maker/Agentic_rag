@@ -20,14 +20,16 @@ SYSTEM_INSTRUCTIONS = (
 )
 
 HYBRID_SYSTEM_INSTRUCTIONS = (
-    "You are a careful assistant that answers questions using uploaded document context "
-    "and web search results provided below. "
-    "Use document sources for information from uploaded files and web sources for external "
-    "or current information. "
+    "You are a careful assistant that answers questions using uploaded document context, "
+    "web search results, and calculator results provided below. "
+    "Use document sources for information from uploaded files, web sources for external "
+    "or current information, and calculator results for computed numeric values. "
     "Answer each part of the question from the most appropriate source type. "
-    "If document context covers one part and web results cover another, combine both. "
+    "If document context covers one part, web results another, and calculator output a "
+    "numeric result, combine them clearly. "
     "Only say you lack enough information when neither source type contains relevant material. "
     "Do not invent facts, documents, page numbers, URLs, or citations. "
+    "Do not recalculate values that are already provided by the calculator result. "
     "When you use information from the context, refer to sources using their labels "
     "(for example [S1], [S2])."
 )
@@ -74,7 +76,9 @@ class PromptBuilder:
         user_prompt = (
             f"{context_block}\n\n"
             f"Question: {query.strip()}\n\n"
-            "Answer using the document context and/or web search results above as appropriate. "
+            "Answer using the document context, web search results, and/or calculator results "
+            "above as appropriate. "
+            "Use calculator results for numeric answers instead of guessing. "
             "Use web results for current or external comparisons when the question asks for them. "
             "Only say you do not have enough information if neither source type is relevant."
         )
@@ -103,7 +107,7 @@ class PromptBuilder:
             )
 
         blocks: list[str] = []
-        document_sections = self._format_chunk_sections(chunks, include=lambda c: c.file_type != "web")
+        document_sections = self._format_chunk_sections(chunks, include=lambda c: c.file_type not in {"web", "calculator"})
         if document_sections:
             blocks.append(f"Uploaded document context:\n{document_sections}")
         web_sections = self._format_chunk_sections(
@@ -113,6 +117,12 @@ class PromptBuilder:
         )
         if web_sections:
             blocks.append(f"Web search results:\n{web_sections}")
+        calculator_sections = self._format_chunk_sections(
+            chunks,
+            include=lambda c: c.file_type == "calculator",
+        )
+        if calculator_sections:
+            blocks.append(f"Calculator results:\n{calculator_sections}")
         return "\n\n".join(blocks)
 
     def _format_chunk_sections(

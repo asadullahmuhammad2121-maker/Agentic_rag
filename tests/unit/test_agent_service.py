@@ -26,6 +26,7 @@ from app.services.agent.planning.planner import QueryPlanner
 from app.services.agent.routing.router import QueryRouter
 from app.services.agent.service import AgentService
 from app.services.agent.tools.base import Tool
+from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME, CalculatorTool
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME, RAGRetrievalTool
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME, TavilyWebSearchTool
@@ -385,3 +386,83 @@ def test_observation_contains_retrieval_metadata_before_finish() -> None:
     assert observation.metadata["generated"] is True
     assert observation.metadata["result_count"] == 1
     assert RAGRetrievalOutput.model_validate(observation.tool_output).result_count == 1
+
+
+def test_run_executes_calculator_only() -> None:
+    settings = make_settings(calculator_enabled=True)
+    calc_tool = CalculatorTool(settings)
+    service = AgentService(
+        agent=_foundation_agent(),
+        tools=ToolRegistry([RAGRetrievalTool(MagicMock()), calc_tool]),
+        rag_service=MagicMock(),
+        web_answer_generator=_web_generator(),
+        max_steps=2,
+    )
+
+    result = service.run("What is 17.5% of 84000?")
+
+    assert result.tool_used == CALCULATOR_TOOL_NAME
+    assert "14700" in result.answer.replace(",", "")
+    assert result.steps[0].observation is not None
+    assert result.steps[0].observation.metadata.get("result") == 14700
+
+
+def test_run_executes_rag_and_calculator() -> None:
+    rag, generation = _rag_services()
+    revenue_chunk = RetrievedChunk(
+        chunk_id="c-rev",
+        text="Total revenue for the quarter was $2,400,000.",
+        document_id="doc-fin",
+        filename="finance.txt",
+        file_type="txt",
+        source="finance.txt",
+        page_number=1,
+        section=None,
+        chunk_index=0,
+        chunking_strategy="fixed",
+        score=0.99,
+    )
+    rag.retrieve_context.return_value = RetrievalContext(
+        query="15% increase on revenue",
+        chunks=[revenue_chunk],
+    )
+    generation.generate_from_chunks.return_value = RAGResult(
+        answer="A 15% increase on $2,400,000 revenue is $2,760,000.",
+        citations=[
+            Citation(
+                document_id="doc-fin",
+                filename="finance.txt",
+                file_type="txt",
+                source="finance.txt",
+                page_number=1,
+                section=None,
+                chunk_index=0,
+                chunk_id="c-rev",
+                score=0.99,
+                label="S1",
+            )
+        ],
+    )
+    settings = make_settings(calculator_enabled=True)
+    service = AgentService(
+        agent=_foundation_agent(),
+        tools=ToolRegistry(
+            [
+                RAGRetrievalTool(rag),
+                CalculatorTool(settings),
+            ]
+        ),
+        rag_service=generation,
+        web_answer_generator=_web_generator(),
+        max_steps=2,
+    )
+
+    result = service.run(
+        "According to my uploaded document, what is 20% of 2400000?"
+    )
+
+    tool_names = result.metadata.get("tool_names") or []
+    assert RAG_RETRIEVAL_TOOL_NAME in tool_names
+    assert CALCULATOR_TOOL_NAME in tool_names
+    assert result.answer
+    generation.generate_from_chunks.assert_called_once()

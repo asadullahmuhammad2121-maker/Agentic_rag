@@ -40,6 +40,8 @@ PLANNING_SYSTEM_PROMPT = (
     "Each task must contain one self-contained sub-query and exactly one tool name. "
     "Use rag_retrieval for uploaded/internal document questions. "
     "Use tavily_web_search for current or external web information. "
+    "Use calculator for arithmetic, percentages, averages, or numeric computation. "
+    "Use rag_retrieval and calculator together when a document value must be calculated. "
     "Do not invent tool names."
 )
 

@@ -7,10 +7,24 @@ export function cn(...inputs: ClassValue[]) {
 
 export function formatToolLabel(toolUsed: string | null | undefined): string {
   if (!toolUsed) return "Unknown";
-  if (toolUsed.includes("+")) return "RAG + Tavily";
-  if (toolUsed === "rag_retrieval") return "RAG";
-  if (toolUsed === "tavily_web_search") return "Tavily Web Search";
-  return toolUsed;
+  const labels: Record<string, string> = {
+    rag_retrieval: "RAG",
+    tavily_web_search: "Tavily Web Search",
+    calculator: "Calculator",
+  };
+  if (toolUsed.includes("+")) {
+    return toolUsed
+      .split("+")
+      .map((name) => labels[name.trim()] ?? name.trim())
+      .join(" + ");
+  }
+  return labels[toolUsed] ?? toolUsed;
+}
+
+export function formatCalculatorResult(value: number | null | undefined): string {
+  if (value == null || Number.isNaN(value)) return "—";
+  if (Number.isInteger(value)) return value.toLocaleString();
+  return value.toLocaleString(undefined, { maximumFractionDigits: 4 });
 }
 
 export function formatFileSize(bytes: number): string {

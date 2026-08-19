@@ -270,6 +270,18 @@ class Settings(BaseSettings):
     )
     tavily_timeout_seconds: float = Field(default=30.0, gt=0, le=300)
 
+    # Calculator (Phase 3G)
+    calculator_enabled: bool = Field(
+        default=True,
+        description="Enable the deterministic calculator agent tool",
+    )
+    calculator_max_expression_length: int = Field(
+        default=500,
+        gt=0,
+        le=5000,
+        description="Maximum characters allowed in a calculator expression",
+    )
+
     # Qdrant
     qdrant_url: str = Field(default="http://localhost:6333")
     qdrant_collection_name: str = Field(default="documents")

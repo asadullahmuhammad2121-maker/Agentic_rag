@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.core.exceptions import AgentError, AppError, QueryError
 from app.core.logging import get_logger
 from app.services.agent.base import Agent
+from app.services.agent.generation.calculator import format_calculator_answer
 from app.services.agent.generation.combined import merge_tool_outputs_to_chunks
 from app.services.agent.generation.web import WebAnswerGenerator
 from app.services.agent.models import (
@@ -15,9 +16,11 @@ from app.services.agent.models import (
     AgentRunResult,
     AgentStep,
     AgentTask,
+    CalculatorOutput,
     RAGRetrievalOutput,
     TavilySearchOutput,
 )
+from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
 from app.services.agent.tools.converters import (
     citations_from_rag,
     output_to_chunk,
@@ -252,6 +255,8 @@ class AgentService:
             return self._generate_from_rag(request, observation)
         if observation.tool_name == TAVILY_WEB_SEARCH_TOOL_NAME:
             return self._generate_from_web(request, observation)
+        if observation.tool_name == CALCULATOR_TOOL_NAME:
+            return self._generate_from_calculator(request, observation)
         return observation
 
     def _generate_from_combined(
@@ -268,6 +273,7 @@ class AgentService:
 
         rag_output: RAGRetrievalOutput | None = None
         web_output: TavilySearchOutput | None = None
+        calculator_output: CalculatorOutput | None = None
         for tool_name, payload in tool_outputs.items():
             if payload is None:
                 continue
@@ -275,8 +281,10 @@ class AgentService:
                 rag_output = RAGRetrievalOutput.model_validate(payload)
             elif tool_name == TAVILY_WEB_SEARCH_TOOL_NAME:
                 web_output = TavilySearchOutput.model_validate(payload)
+            elif tool_name == CALCULATOR_TOOL_NAME:
+                calculator_output = CalculatorOutput.model_validate(payload)
 
-        if rag_output is not None and web_output is None:
+        if rag_output is not None and web_output is None and calculator_output is None:
             single = observation.model_copy(
                 update={
                     "tool_name": RAG_RETRIEVAL_TOOL_NAME,
@@ -285,7 +293,7 @@ class AgentService:
             )
             generated = self._generate_from_rag(request, single)
             return self._with_multi_tool_metadata(generated, observation)
-        if web_output is not None and rag_output is None:
+        if web_output is not None and rag_output is None and calculator_output is None:
             single = observation.model_copy(
                 update={
                     "tool_name": TAVILY_WEB_SEARCH_TOOL_NAME,
@@ -294,8 +302,21 @@ class AgentService:
             )
             generated = self._generate_from_web(request, single)
             return self._with_multi_tool_metadata(generated, observation)
+        if calculator_output is not None and rag_output is None and web_output is None:
+            single = observation.model_copy(
+                update={
+                    "tool_name": CALCULATOR_TOOL_NAME,
+                    "tool_output": calculator_output.model_dump(),
+                }
+            )
+            generated = self._generate_from_calculator(request, single)
+            return self._with_multi_tool_metadata(generated, observation)
 
-        chunks = merge_tool_outputs_to_chunks(rag_output=rag_output, web_output=web_output)
+        chunks = merge_tool_outputs_to_chunks(
+            rag_output=rag_output,
+            web_output=web_output,
+            calculator_output=calculator_output,
+        )
         logger.info(
             "agent_generation_started",
             extra={
@@ -444,6 +465,53 @@ class AgentService:
             update={
                 "answer": answer,
                 "citations": citations,
+                "metadata": metadata,
+            }
+        )
+
+    def _generate_from_calculator(
+        self,
+        request: AgentRequest,
+        observation: AgentObservation,
+    ) -> AgentObservation:
+        if observation.tool_output is None:
+            raise AgentError(
+                "Calculator succeeded without structured output",
+                details={"reason": "missing_tool_output", "tool_name": observation.tool_name},
+            )
+
+        calc_output = CalculatorOutput.model_validate(observation.tool_output)
+        logger.info(
+            "agent_generation_started",
+            extra={
+                "operation": "agent_run",
+                "tool_name": observation.tool_name,
+                "expression": calc_output.expression,
+            },
+        )
+        answer = format_calculator_answer(calc_output)
+        logger.info(
+            "agent_generation_completed",
+            extra={
+                "operation": "agent_run",
+                "tool_name": observation.tool_name,
+                "answer_length": len(answer),
+            },
+        )
+        metadata = dict(observation.metadata)
+        metadata.update(
+            {
+                "generated": True,
+                "citation_count": 0,
+                "empty_retrieval": False,
+                "expression": calc_output.expression,
+                "result": calc_output.result,
+            }
+        )
+        return observation.model_copy(
+            update={
+                "answer": answer,
+                "citations": [],
                 "metadata": metadata,
             }
         )

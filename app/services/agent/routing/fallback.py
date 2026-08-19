@@ -5,6 +5,13 @@ from __future__ import annotations
 import re
 
 from app.services.agent.models import AgentRequest, RoutingDecision
+from app.services.agent.routing.calculation import (
+    enrich_calculation_tool_selection,
+    has_document_markers,
+    looks_like_calculation_query,
+    select_tools_for_calculation_fallback,
+)
+from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME
@@ -58,10 +65,15 @@ def select_tool_for_subquery(query: str, tools: ToolRegistry) -> str:
 
     internal = _looks_like_internal_query(query)
     web = _looks_like_web_query(query)
+    calc = looks_like_calculation_query(query)
+    if calc and CALCULATOR_TOOL_NAME in tools and not has_document_markers(query) and not web:
+        return CALCULATOR_TOOL_NAME
     if internal and not web and RAG_RETRIEVAL_TOOL_NAME in tools:
         return RAG_RETRIEVAL_TOOL_NAME
     if web and not internal and TAVILY_WEB_SEARCH_TOOL_NAME in tools:
         return TAVILY_WEB_SEARCH_TOOL_NAME
+    if CALCULATOR_TOOL_NAME in tool_names:
+        return CALCULATOR_TOOL_NAME
     return tool_names[0]
 
 
@@ -70,6 +82,7 @@ def route_with_fallback(request: AgentRequest, tools: ToolRegistry) -> RoutingDe
     names = tools.names()
     has_rag = RAG_RETRIEVAL_TOOL_NAME in tools
     has_tavily = TAVILY_WEB_SEARCH_TOOL_NAME in tools
+    has_calculator = CALCULATOR_TOOL_NAME in tools
 
     if _has_retrieval_filters(request):
         if has_rag:
@@ -86,25 +99,28 @@ def route_with_fallback(request: AgentRequest, tools: ToolRegistry) -> RoutingDe
             used_fallback=True,
         )
 
-    selected: list[str] = []
-    if has_rag and _looks_like_internal_query(request.query):
-        selected.append(RAG_RETRIEVAL_TOOL_NAME)
-    if (
-        has_tavily
-        and _looks_like_web_query(request.query)
-        and TAVILY_WEB_SEARCH_TOOL_NAME not in selected
-    ):
-        selected.append(TAVILY_WEB_SEARCH_TOOL_NAME)
+    selected = select_tools_for_calculation_fallback(
+        query=request.query,
+        tools=tools,
+        has_rag=has_rag,
+        has_tavily=has_tavily,
+        has_calculator=has_calculator,
+        looks_internal=_looks_like_internal_query(request.query),
+        looks_web=_looks_like_web_query(request.query),
+    )
 
     if not selected:
         if has_rag:
             selected = [RAG_RETRIEVAL_TOOL_NAME]
         elif has_tavily:
             selected = [TAVILY_WEB_SEARCH_TOOL_NAME]
+        elif has_calculator:
+            selected = [CALCULATOR_TOOL_NAME]
         else:
             selected = [names[0]]
 
     selected = enrich_hybrid_tool_selection(selected, request.query, tools)
+    selected = enrich_calculation_tool_selection(selected, request.query, tools)
 
     reasoning = "Fallback routing selected the most appropriate registered tool(s)."
     if len(selected) > 1:

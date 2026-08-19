@@ -57,11 +57,18 @@ def tool_result_to_observation(tool_name: str, result: ToolResult) -> AgentObser
     """Convert a structured tool result into an agent observation."""
     if result.success:
         assert result.output is not None
+        metadata: dict[str, object] = {"result_count": _result_count(result.output)}
+        expression = getattr(result.output, "expression", None)
+        calc_result = getattr(result.output, "result", None)
+        if isinstance(expression, str):
+            metadata["expression"] = expression
+        if isinstance(calc_result, (int, float)):
+            metadata["result"] = float(calc_result)
         return AgentObservation(
             tool_name=tool_name,
             success=True,
             tool_output=result.output.model_dump(),
-            metadata={"result_count": _result_count(result.output)},
+            metadata=metadata,
         )
     assert result.error is not None
     return AgentObservation(

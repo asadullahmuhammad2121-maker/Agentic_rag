@@ -11,11 +11,13 @@ from app.core.exceptions import ConfigurationError, QdrantConnectionError, Query
 from app.services.agent.models import RAGRetrievalInput, RAGRetrievalOutput, ToolResult
 from app.services.agent.tools.base import Tool
 from app.services.agent.tools.converters import tool_result_to_observation
+from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME, RAGRetrievalTool
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.rag.service import RetrievalContext
 from app.services.retrieval.filters import RetrievalFilters
 from app.services.retrieval.service import RetrievedChunk
+from tests.conftest import make_settings
 
 
 class _SampleInput(BaseModel):
@@ -175,6 +177,16 @@ def test_rag_tool_returns_empty_retrieval_output() -> None:
     assert result.success is True
     assert isinstance(result.output, RAGRetrievalOutput)
     assert result.output.empty is True
+
+
+def test_registry_includes_calculator_when_enabled() -> None:
+    from app.api.deps import get_calculator_tool, get_rag_retrieval_tool, get_tool_registry
+
+    settings = make_settings(calculator_enabled=True)
+    rag_tool = get_rag_retrieval_tool(MagicMock())
+    calculator_tool = get_calculator_tool(settings)
+    registry = get_tool_registry(rag_tool, None, calculator_tool)
+    assert CALCULATOR_TOOL_NAME in registry
 
 
 def test_rag_tool_input_model_matches_arguments() -> None:

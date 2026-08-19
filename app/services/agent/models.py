@@ -183,6 +183,43 @@ class TavilySearchOutput(BaseModel):
         return not self.results
 
 
+class CalculatorInput(BaseModel):
+    """Structured input for the calculator tool."""
+
+    query: str = Field(min_length=1, max_length=4000)
+    expression: str | None = Field(default=None, max_length=4000)
+
+    @field_validator("query")
+    @classmethod
+    def strip_query(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            msg = "Query must not be empty"
+            raise ValueError(msg)
+        return stripped
+
+    @field_validator("expression")
+    @classmethod
+    def strip_expression(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+
+class CalculatorOutput(BaseModel):
+    """Structured calculator result."""
+
+    query: str
+    expression: str
+    result: float
+    source_text: str
+
+    @property
+    def result_count(self) -> int:
+        return 1
+
+
 class RoutingDecision(BaseModel):
     """Validated tool routing plan for a user query."""
 

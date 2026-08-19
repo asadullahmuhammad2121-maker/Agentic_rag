@@ -16,9 +16,14 @@ EMPTY_WEB_SEARCH_ANSWER = (
 
 WEB_SYSTEM_INSTRUCTIONS = (
     "You are a careful assistant that answers questions using only the provided web search results. "
-    "If the results are missing, empty, or insufficient, say that you do not have enough information. "
-    "Do not invent facts, URLs, or citations. "
-    "When you use information from the results, refer to sources using their labels "
+    "If the results contain relevant information, answer with what is supported by the results, "
+    "even when some requested details are missing. "
+    "Provide partial answers when the results answer part of the question; briefly note which "
+    "details are not present in the results. "
+    "Only say you do not have enough information when the results contain no meaningful or "
+    "relevant information for the question. "
+    "Do not invent facts, URLs, dates, names, or citations beyond what appears in the results. "
+    "When you use information from the results, cite sources using their labels "
     "(for example [S1], [S2])."
 )
 
@@ -83,7 +88,11 @@ class WebAnswerGenerator:
             f"Web search results:\n{context_block}\n\n"
             f"Question: {query}\n\n"
             "Answer using only the web results above. "
-            "If the results are insufficient, say you do not have enough information."
+            "Use all relevant facts from the results, even if they do not fully answer every part "
+            "of the question. "
+            "If some requested details are missing from the results, answer with what is available "
+            "and briefly state which details were not found in the results. "
+            "Only say you do not have enough information if none of the results are relevant."
         )
 
     def _format_results(self, results: list[WebSearchResultItem]) -> str:

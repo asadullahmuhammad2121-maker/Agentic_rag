@@ -8,6 +8,7 @@ from typing import Final
 
 from app.services.chunking.base import TextChunk, TextSegment
 from app.services.chunking.config import ChunkingConfig
+from app.services.chunking.structured_blocks import split_structured_text
 from app.services.ingestion.base import ExtractedSection
 
 SENTENCE_PATTERN: Final[re.Pattern[str]] = re.compile(
@@ -207,6 +208,45 @@ def fixed_split_text(text: str, *, config: ChunkingConfig) -> list[tuple[str, in
             next_start = start + 1
         start = next_start
     return parts
+
+
+def split_text_with_structured_blocks(
+    text: str,
+    *,
+    config: ChunkingConfig,
+    preserve_prose_intact: bool,
+) -> list[tuple[str, int, int]]:
+    """
+    Split text while preserving structured heading/list blocks when possible.
+
+    Structured list blocks are kept intact when they fit within ``max_chunk_size``.
+    Prose blocks are kept intact only when ``preserve_prose_intact`` is True
+    (structure strategy). Otherwise prose falls back to recursive splitting.
+    """
+    pieces: list[tuple[str, int, int]] = []
+    for block_text, start, end, is_list_block in split_structured_text(text):
+        keep_intact = len(block_text) <= config.max_chunk_size and (
+            is_list_block or preserve_prose_intact
+        )
+        if keep_intact:
+            pieces.append((block_text, start, end))
+            continue
+
+        block_origin = text.find(block_text, max(0, start - 1))
+        if block_origin < 0:
+            block_origin = start
+        for piece_text, piece_start, piece_end in recursive_split_text(
+            block_text,
+            config=config,
+        ):
+            pieces.append(
+                (
+                    piece_text,
+                    block_origin + piece_start,
+                    block_origin + piece_end,
+                )
+            )
+    return pieces
 
 
 def enforce_size_bounds(

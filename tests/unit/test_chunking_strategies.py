@@ -122,6 +122,240 @@ def test_structure_aware_chunker_keeps_small_sections_whole() -> None:
     assert {chunk.section for chunk in chunks} == {"Intro", "Details"}
 
 
+def test_structure_chunker_preserves_heading_and_numbered_list() -> None:
+    section_text = (
+        "Retrieval augmented generation combines search with generation.\n\n"
+        "Core Pipeline\n"
+        "1. Ingest source documents from uploads and connectors\n"
+        "2. Store chunked embeddings in a vector database\n"
+        "3. Retrieve the most relevant context for each query\n"
+        "4. Augment the LLM prompt with retrieved passages\n"
+        "5. Generate a grounded answer with citations\n\n"
+        "Teams should measure quality after each stage."
+    )
+    chunker = StructureAwareChunker(
+        _config(
+            strategy="structure",
+            chunk_size=80,
+            chunk_overlap=0,
+            max_chunk_size=600,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-pipeline",
+        filename="pipeline.txt",
+        file_type="txt",
+        source="pipeline.txt",
+    )
+    pipeline_chunks = [
+        chunk
+        for chunk in chunks
+        if "Core Pipeline" in chunk.text and "1. Ingest" in chunk.text
+    ]
+    assert len(pipeline_chunks) == 1
+    pipeline_chunk = pipeline_chunks[0]
+    for stage in (
+        "2. Store",
+        "3. Retrieve",
+        "4. Augment",
+        "5. Generate",
+    ):
+        assert stage in pipeline_chunk.text
+    assert len(pipeline_chunk.text) <= 600
+
+
+def test_structure_chunker_preserves_trailing_heading_with_list() -> None:
+    section_text = (
+        "Modern RAG stacks implement a repeatable workflow. Core Pipeline\n"
+        "1. Ingest\n"
+        "2. Store\n"
+        "3. Retrieve\n"
+        "4. Augment\n"
+        "5. Generate"
+    )
+    chunker = StructureAwareChunker(
+        _config(
+            strategy="structure",
+            chunk_size=60,
+            chunk_overlap=0,
+            max_chunk_size=400,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-trailing",
+        filename="pipeline.pdf",
+        file_type="pdf",
+        source="pipeline.pdf",
+    )
+    combined = [chunk for chunk in chunks if "1. Ingest" in chunk.text]
+    assert len(combined) == 1
+    assert "Core Pipeline" in combined[0].text
+    assert "5. Generate" in combined[0].text
+
+
+def test_recursive_chunker_preserves_heading_and_numbered_list() -> None:
+    section_text = (
+        "Retrieval augmented generation combines search with generation.\n\n"
+        "Core Pipeline\n"
+        "1. Ingest source documents from uploads and connectors\n"
+        "2. Store chunked embeddings in a vector database\n"
+        "3. Retrieve the most relevant context for each query\n"
+        "4. Augment the LLM prompt with retrieved passages\n"
+        "5. Generate a grounded answer with citations\n\n"
+        "Teams should measure quality after each stage."
+    )
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=80,
+            chunk_overlap=0,
+            max_chunk_size=600,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-pipeline",
+        filename="pipeline.txt",
+        file_type="txt",
+        source="pipeline.txt",
+    )
+    pipeline_chunks = [
+        chunk
+        for chunk in chunks
+        if "Core Pipeline" in chunk.text and "1. Ingest" in chunk.text
+    ]
+    assert len(pipeline_chunks) == 1
+    pipeline_chunk = pipeline_chunks[0]
+    for stage in (
+        "2. Store",
+        "3. Retrieve",
+        "4. Augment",
+        "5. Generate",
+    ):
+        assert stage in pipeline_chunk.text
+    assert len(pipeline_chunk.text) <= 600
+
+
+def test_recursive_chunker_preserves_heading_and_bullet_list() -> None:
+    section_text = (
+        "Deployment checklist\n"
+        "- Provision the vector database\n"
+        "- Configure embedding models\n"
+        "- Validate retrieval quality\n"
+        "- Monitor latency in production"
+    )
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=60,
+            chunk_overlap=0,
+            max_chunk_size=400,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-bullets",
+        filename="checklist.txt",
+        file_type="txt",
+        source="checklist.txt",
+    )
+    checklist_chunks = [
+        chunk
+        for chunk in chunks
+        if "Deployment checklist" in chunk.text and "- Provision" in chunk.text
+    ]
+    assert len(checklist_chunks) == 1
+    assert "- Monitor latency in production" in checklist_chunks[0].text
+
+
+def test_recursive_chunker_still_splits_long_prose() -> None:
+    text = "Paragraph one about cats.\n\nParagraph two about dogs.\n\nParagraph three about birds."
+    chunker = RecursiveChunker(_config(strategy="recursive", chunk_size=60, chunk_overlap=0))
+    chunks = chunker.chunk_sections(
+        _sections(text),
+        document_id="doc-rec-prose",
+        filename="notes.txt",
+        file_type="txt",
+        source="notes.txt",
+    )
+    assert len(chunks) >= 2
+    assert any("cats" in chunk.text for chunk in chunks)
+    assert any("dogs" in chunk.text for chunk in chunks)
+
+
+def test_recursive_chunker_splits_oversized_structured_block() -> None:
+    items = "\n".join(f"{index}. Step {index} with extra detail." for index in range(1, 41))
+    section_text = f"Long Process\n{items}"
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=80,
+            chunk_overlap=0,
+            max_chunk_size=160,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-oversized",
+        filename="process.txt",
+        file_type="txt",
+        source="process.txt",
+    )
+    assert len(chunks) >= 3
+    assert all(len(chunk.text) <= 160 for chunk in chunks)
+    combined = " ".join(chunk.text for chunk in chunks)
+    assert "1. Step 1" in combined
+    assert "40. Step 40" in combined
+    full_list_chunks = [
+        chunk for chunk in chunks if "1. Step 1" in chunk.text and "40. Step 40" in chunk.text
+    ]
+    assert len(full_list_chunks) == 0
+
+
+def test_recursive_chunker_core_pipeline_with_production_limits() -> None:
+    section_text = (
+        "Retrieval augmented generation combines search with generation.\n\n"
+        "Core Pipeline\n"
+        "1. Ingest source documents from uploads and connectors\n"
+        "2. Store chunked embeddings in a vector database\n"
+        "3. Retrieve the most relevant context for each query\n"
+        "4. Augment the LLM prompt with retrieved passages\n"
+        "5. Generate a grounded answer with citations\n\n"
+        "Teams should measure quality after each stage."
+    )
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=500,
+            chunk_overlap=50,
+            min_chunk_size=100,
+            max_chunk_size=2000,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-prod",
+        filename="pipeline.txt",
+        file_type="txt",
+        source="pipeline.txt",
+    )
+    pipeline_chunks = [
+        chunk
+        for chunk in chunks
+        if "Core Pipeline" in chunk.text and "1. Ingest" in chunk.text
+    ]
+    assert len(pipeline_chunks) == 1
+    pipeline_chunk = pipeline_chunks[0]
+    for stage in (
+        "2. Store",
+        "3. Retrieve",
+        "4. Augment",
+        "5. Generate",
+    ):
+        assert stage in pipeline_chunk.text
+
 def test_metadata_preserved_for_all_strategies() -> None:
     section = ExtractedSection(
         text="Metadata check paragraph.",

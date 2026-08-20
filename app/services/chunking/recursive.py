@@ -7,9 +7,9 @@ from app.services.chunking.base import Chunker, TextChunk, TextSegment
 from app.services.chunking.config import ChunkingConfig
 from app.services.chunking.utils import (
     enforce_size_bounds,
-    recursive_split_text,
     section_to_segment,
     segments_to_chunks,
+    split_text_with_structured_blocks,
 )
 from app.services.ingestion.base import ExtractedSection
 
@@ -40,7 +40,11 @@ class RecursiveChunker(Chunker):
             base = section_to_segment(section)
             if base is None:
                 continue
-            for text, start, end in recursive_split_text(section.text, config=self._config):
+            for text, start, end in split_text_with_structured_blocks(
+                section.text,
+                config=self._config,
+                preserve_prose_intact=False,
+            ):
                 segments.append(
                     TextSegment(
                         text=text,

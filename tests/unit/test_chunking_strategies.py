@@ -356,6 +356,82 @@ def test_recursive_chunker_core_pipeline_with_production_limits() -> None:
     ):
         assert stage in pipeline_chunk.text
 
+
+def test_recursive_chunker_preserves_pdf_style_number_label_list() -> None:
+    section_text = (
+        "Why It Matters\n"
+        "Language models have a fixed training cutoff.\n"
+        "The Core Pipeline\n"
+        "1\n"
+        "Ingest: Documents are split into chunks and converted into vector embeddings.\n"
+        "2\n"
+        "Store: Embeddings are saved in a vector database.\n"
+        "3\n"
+        "Retrieve: A user query is embedded and matched against stored vectors.\n"
+        "4\n"
+        "Augment: Retrieved chunks are inserted into the prompt as context.\n"
+        "5\n"
+        "Generate: The language model produces a response grounded in that context.\n"
+        "Common Challenges\n"
+        "Chunking strategy affects retrieval quality."
+    )
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=500,
+            chunk_overlap=50,
+            min_chunk_size=100,
+            max_chunk_size=2000,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-pdf-list",
+        filename="rag_guide.pdf",
+        file_type="pdf",
+        source="rag_guide.pdf",
+    )
+    pipeline_chunks = [
+        chunk
+        for chunk in chunks
+        if "Core Pipeline" in chunk.text and "Ingest:" in chunk.text
+    ]
+    assert len(pipeline_chunks) == 1
+    pipeline_chunk = pipeline_chunks[0]
+    for stage in ("Store:", "Retrieve:", "Augment:", "Generate:"):
+        assert stage in pipeline_chunk.text
+    assert len(pipeline_chunk.text) <= 2000
+
+
+def test_recursive_chunker_splits_oversized_pdf_style_list() -> None:
+    lines: list[str] = ["Long Process"]
+    for index in range(1, 41):
+        lines.append(str(index))
+        lines.append(f"Step {index}: Detailed description of operation {index}.")
+    section_text = "\n".join(lines)
+    chunker = RecursiveChunker(
+        _config(
+            strategy="recursive",
+            chunk_size=80,
+            chunk_overlap=0,
+            max_chunk_size=160,
+        )
+    )
+    chunks = chunker.chunk_sections(
+        _sections(section_text),
+        document_id="doc-rec-pdf-oversized",
+        filename="process.pdf",
+        file_type="pdf",
+        source="process.pdf",
+    )
+    assert len(chunks) >= 3
+    assert all(len(chunk.text) <= 160 for chunk in chunks)
+    full_list_chunks = [
+        chunk
+        for chunk in chunks
+        if "Step 1:" in chunk.text and "Step 40:" in chunk.text
+    ]
+    assert len(full_list_chunks) == 0
 def test_metadata_preserved_for_all_strategies() -> None:
     section = ExtractedSection(
         text="Metadata check paragraph.",

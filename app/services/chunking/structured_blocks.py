@@ -10,6 +10,7 @@ StructuredTextBlock: TypeAlias = tuple[str, int, int, bool]
 _NUMBERED_LIST_LINE = re.compile(r"^\d+[.)]\s+\S")
 _BULLET_LIST_LINE = re.compile(r"^[-*•]\s+\S")
 _LABEL_LIST_LINE = re.compile(r"^[A-Za-z][\w\s\-]{0,60}:\s+\S")
+_NUMBER_ONLY_LINE = re.compile(r"^\d+[.)]?$")
 _TRAILING_HEADING = re.compile(
     r"^(?P<prose>.+[.!?])\s+(?P<heading>.{1,100})$"
 )
@@ -23,8 +24,16 @@ def is_list_line(line: str) -> bool:
     return (
         _NUMBERED_LIST_LINE.match(stripped) is not None
         or _BULLET_LIST_LINE.match(stripped) is not None
-        or _LABEL_LIST_LINE.match(stripped) is not None
+        or _is_label_colon_line(stripped)
     )
+
+
+def _is_label_colon_line(line: str) -> bool:
+    return _LABEL_LIST_LINE.match(line.strip()) is not None
+
+
+def _is_number_only_line(line: str) -> bool:
+    return _NUMBER_ONLY_LINE.match(line.strip()) is not None
 
 
 def extract_trailing_heading(line: str) -> tuple[str, str | None]:
@@ -150,6 +159,31 @@ def _list_run_length(spans: list[tuple[str, int, int]], start: int) -> int:
     return length
 
 
+def _pdf_style_list_run(spans: list[tuple[str, int, int]], start: int) -> tuple[int, int] | None:
+    """
+    Return (item_count, end_span_index_exclusive) for a PDF-style list run.
+
+    Wrapped description lines after a label-colon line are included in the item.
+    """
+    item_count = 0
+    index = start
+    while index + 1 < len(spans):
+        number_line = spans[index][0]
+        label_line = spans[index + 1][0]
+        if not (_is_number_only_line(number_line) and _is_label_colon_line(label_line)):
+            break
+        item_count += 1
+        index += 2
+        while index < len(spans):
+            continuation = spans[index][0]
+            if _is_number_only_line(continuation) or _is_label_colon_line(continuation):
+                break
+            index += 1
+    if item_count < 2:
+        return None
+    return item_count, index
+
+
 def _blank_line_before(text: str, spans: list[tuple[str, int, int]], line_index: int) -> bool:
     if line_index <= 0:
         return True
@@ -167,32 +201,57 @@ def _structured_list_ranges(
     ranges: list[tuple[int, int]] = []
     index = 0
     while index < len(spans):
-        run_length = _list_run_length(spans, index)
-        if run_length < 2:
-            index += 1
-            continue
+        standard_run = _list_run_length(spans, index)
 
-        list_start = index
-        list_end = index + run_length
+        if standard_run >= 2:
+            list_start = index
+            list_end = index + standard_run
+            index = list_end
+        else:
+            pdf_run = _pdf_style_list_run(spans, index)
+            if pdf_run is None:
+                index += 1
+                continue
+            list_start = index
+            list_end = pdf_run[1]
+            index = list_end
+
         char_start = spans[list_start][1]
         char_end = spans[list_end - 1][2]
-
-        heading_index = list_start - 1
-        if heading_index >= 0:
-            previous_line, previous_start, _previous_end = spans[heading_index]
-            if not is_list_line(previous_line):
-                if _blank_line_before(text, spans, heading_index):
-                    char_start = previous_start
-                else:
-                    prose, trailing = extract_trailing_heading(previous_line)
-                    if trailing:
-                        char_start = _previous_end - len(trailing)
-                    elif len(previous_line) <= 100 and not previous_line.endswith((".", "!", "?")):
-                        char_start = previous_start
-
+        char_start = _extend_range_with_heading(
+            text,
+            spans,
+            list_start,
+            char_start,
+        )
         ranges.append((char_start, char_end))
-        index = list_end
     return _merge_ranges(ranges)
+
+
+def _extend_range_with_heading(
+    text: str,
+    spans: list[tuple[str, int, int]],
+    list_start: int,
+    char_start: int,
+) -> int:
+    """Include a heading line immediately preceding a detected list run."""
+    heading_index = list_start - 1
+    if heading_index < 0:
+        return char_start
+
+    previous_line, previous_start, previous_end = spans[heading_index]
+    if is_list_line(previous_line) or _is_number_only_line(previous_line):
+        return char_start
+
+    if _blank_line_before(text, spans, heading_index):
+        return previous_start
+
+    prose, trailing = extract_trailing_heading(previous_line)
+    if trailing:
+        return previous_end - len(trailing)
+    if len(previous_line) <= 100 and not previous_line.endswith((".", "!", "?")):
+        return previous_start
+    return char_start
 
 
 def _merge_ranges(ranges: list[tuple[int, int]]) -> list[tuple[int, int]]:

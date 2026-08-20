@@ -44,7 +44,11 @@ class FoundationAgent(Agent):
         history: Sequence[AgentStep],
     ) -> AgentAction:
         if history:
-            recovery = maybe_document_navigation_recovery(history, tools=tools)
+            recovery = maybe_document_navigation_recovery(
+                history,
+                query=request.query,
+                tools=tools,
+            )
             if recovery is not None:
                 logger.info(
                     "agent_document_navigation_recovery_selected",

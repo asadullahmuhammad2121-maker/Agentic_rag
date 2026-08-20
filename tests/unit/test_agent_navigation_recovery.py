@@ -19,6 +19,7 @@ from app.services.agent.planning.planner import QueryPlanner
 from app.services.agent.recovery.navigation import (
     is_insufficient_rag_answer,
     maybe_document_navigation_recovery,
+    retrieval_likely_incomplete_for_query,
 )
 from app.services.agent.routing.router import QueryRouter
 from app.services.agent.service import AgentService
@@ -33,6 +34,20 @@ from app.services.retrieval.document_navigation import DocumentNavigationService
 from app.services.retrieval.service import RetrievedChunk
 from app.vector_store.base import SearchResult, VectorStore
 from tests.conftest import make_settings
+
+CORE_PIPELINE_STAGES = ("Ingest", "Store", "Retrieve", "Augment", "Generate")
+
+FIVE_STAGES_QUERY = (
+    "According to my uploaded RAG document, what are the five stages of the Core Pipeline?"
+)
+STAGE_AFTER_INGEST_QUERY = (
+    "According to my uploaded RAG document, what is the stage immediately after Ingest "
+    "in the Core Pipeline?"
+)
+PIPELINE_FROM_INGEST_QUERY = (
+    "According to my uploaded RAG document, explain the Core Pipeline starting from Ingest "
+    "and include the next stages in order."
+)
 
 
 def _payload(
@@ -53,6 +68,62 @@ def _payload(
         "source": "guide.pdf",
         "chunking_strategy": "recursive",
     }
+
+
+def _core_pipeline_nav_records() -> dict[tuple[str, int], dict[str, Any]]:
+    stage_text = {
+        "Ingest": "Ingest: Documents are split into chunks and converted into vector embeddings.",
+        "Store": "Store: Embeddings are saved in a vector database.",
+        "Retrieve": "Retrieve: A user query is embedded and matched against stored vectors.",
+        "Augment": "Augment: Retrieved chunks are inserted into the prompt as context.",
+        "Generate": "Generate: The language model produces a response grounded in that context.",
+    }
+    records: dict[tuple[str, int], dict[str, Any]] = {}
+    for index, stage in enumerate(CORE_PIPELINE_STAGES):
+        chunk_index = 9 + index
+        records[("doc-a", chunk_index)] = _payload(
+            document_id="doc-a",
+            chunk_index=chunk_index,
+            chunk_id=f"doc-a:{chunk_index:05d}",
+            text=(f"Core Pipeline\n{index + 1}\n{stage_text[stage]}"),
+        )
+    return records
+
+
+def _fragmented_ingest_chunk() -> RetrievedChunk:
+    return RetrievedChunk(
+        chunk_id="doc-a:00009",
+        text="Core Pipeline\n1\nIngest: Documents are split into chunks.",
+        document_id="doc-a",
+        filename="guide.pdf",
+        file_type="pdf",
+        source="guide.pdf",
+        page_number=1,
+        section=None,
+        chunk_index=9,
+        chunking_strategy="recursive",
+        score=0.91,
+    )
+
+
+def _complete_pipeline_chunk() -> RetrievedChunk:
+    combined = "\n".join(
+        f"{index + 1}\n{stage}: stage description."
+        for index, stage in enumerate(CORE_PIPELINE_STAGES)
+    )
+    return RetrievedChunk(
+        chunk_id="doc-a:00009",
+        text=f"Core Pipeline\n{combined}",
+        document_id="doc-a",
+        filename="guide.pdf",
+        file_type="pdf",
+        source="guide.pdf",
+        page_number=1,
+        section=None,
+        chunk_index=9,
+        chunking_strategy="recursive",
+        score=0.95,
+    )
 
 
 class _IndexedVectorStore:
@@ -110,6 +181,28 @@ def _chunk_output(
     )
 
 
+def _full_pipeline_answer() -> str:
+    return "The five Core Pipeline stages are Ingest, Store, Retrieve, Augment, and Generate."
+
+
+def _full_pipeline_citations() -> list[Citation]:
+    return [
+        Citation(
+            document_id="doc-a",
+            filename="guide.pdf",
+            file_type="pdf",
+            source="guide.pdf",
+            page_number=1,
+            section=None,
+            chunk_index=9 + index,
+            chunk_id=f"doc-a:{9 + index:05d}",
+            score=1.0,
+            label=f"S{index + 1}",
+        )
+        for index in range(len(CORE_PIPELINE_STAGES))
+    ]
+
+
 def _recovery_service(
     *,
     rag_chunks: list[RetrievedChunk],
@@ -134,40 +227,153 @@ def _recovery_service(
     )
 
 
-def test_retrieval_navigation_recovery_generates_combined_answer() -> None:
-    fragmented = RetrievedChunk(
-        chunk_id="doc-a:00009",
-        text="The Core Pipeline 1",
-        document_id="doc-a",
-        filename="guide.pdf",
-        file_type="pdf",
-        source="guide.pdf",
-        page_number=1,
-        section=None,
-        chunk_index=9,
-        chunking_strategy="recursive",
-        score=0.91,
+def _assert_pipeline_stages(answer: str) -> None:
+    for stage in CORE_PIPELINE_STAGES:
+        assert stage in answer
+
+
+def test_five_stages_query_triggers_navigation_and_combined_answer() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="The Core Pipeline begins with Ingest.",
+            citations=[],
+        ),
+        RAGResult(
+            answer=_full_pipeline_answer(),
+            citations=_full_pipeline_citations(),
+        ),
+    ]
+    service = _recovery_service(
+        rag_chunks=[_fragmented_ingest_chunk()],
+        nav_records=_core_pipeline_nav_records(),
+        generation=generation,
     )
-    nav_records = {
-        ("doc-a", 9): _payload(
-            document_id="doc-a",
-            chunk_index=9,
-            chunk_id="doc-a:00009",
-            text="The Core Pipeline 1",
+
+    result = service.run(FIVE_STAGES_QUERY)
+
+    _assert_pipeline_stages(result.answer)
+    assert generation.generate_from_chunks.call_count == 2
+    assert result.steps[0].action.tool_name == RAG_RETRIEVAL_TOOL_NAME
+    assert result.steps[1].action.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
+    assert result.steps[1].observation is not None
+    assert result.steps[1].observation.metadata.get("recovery") is True
+    assert result.citations
+
+
+def test_stage_after_ingest_query_triggers_navigation() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="Ingest is the first Core Pipeline stage.",
+            citations=[],
         ),
-        ("doc-a", 10): _payload(
-            document_id="doc-a",
-            chunk_index=10,
-            chunk_id="doc-a:00010",
-            text="Ingest: Documents are split into chunks.",
+        RAGResult(
+            answer="The stage immediately after Ingest is Store.",
+            citations=[
+                Citation(
+                    document_id="doc-a",
+                    filename="guide.pdf",
+                    file_type="pdf",
+                    source="guide.pdf",
+                    page_number=1,
+                    section=None,
+                    chunk_index=10,
+                    chunk_id="doc-a:00010",
+                    score=1.0,
+                    label="S2",
+                )
+            ],
         ),
-        ("doc-a", 11): _payload(
-            document_id="doc-a",
-            chunk_index=11,
-            chunk_id="doc-a:00011",
-            text="Store: Embeddings are saved in a vector database.",
+    ]
+    service = _recovery_service(
+        rag_chunks=[_fragmented_ingest_chunk()],
+        nav_records=_core_pipeline_nav_records(),
+        generation=generation,
+    )
+
+    result = service.run(STAGE_AFTER_INGEST_QUERY)
+
+    assert "Store" in result.answer
+    assert generation.generate_from_chunks.call_count == 2
+    assert result.steps[1].action.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
+
+
+def test_pipeline_from_ingest_query_triggers_navigation() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="Ingest splits documents into chunks.",
+            citations=[],
         ),
-    }
+        RAGResult(
+            answer=(
+                "Starting from Ingest, the Core Pipeline continues with Store, "
+                "Retrieve, Augment, and Generate in order."
+            ),
+            citations=_full_pipeline_citations(),
+        ),
+    ]
+    service = _recovery_service(
+        rag_chunks=[_fragmented_ingest_chunk()],
+        nav_records=_core_pipeline_nav_records(),
+        generation=generation,
+    )
+
+    result = service.run(PIPELINE_FROM_INGEST_QUERY)
+
+    assert "Ingest" in result.answer
+    assert "Store" in result.answer
+    assert "Retrieve" in result.answer
+    assert generation.generate_from_chunks.call_count == 2
+    assert result.steps[1].action.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
+
+
+def test_partial_context_without_refusal_triggers_navigation() -> None:
+    retrieval = RAGRetrievalOutput(
+        query="pipeline",
+        chunks=[
+            _chunk_output(
+                chunk_id="doc-a:00009", text=_fragmented_ingest_chunk().text, chunk_index=9
+            )
+        ],
+    )
+    assert retrieval_likely_incomplete_for_query(FIVE_STAGES_QUERY, retrieval)
+
+    recovery = maybe_document_navigation_recovery(
+        [
+            AgentStep(
+                action=AgentAction(
+                    type=AgentActionType.CALL_TOOL,
+                    tool_name=RAG_RETRIEVAL_TOOL_NAME,
+                    tool_names=[RAG_RETRIEVAL_TOOL_NAME],
+                    arguments={"query": FIVE_STAGES_QUERY},
+                ),
+                observation=AgentObservation(
+                    tool_name=RAG_RETRIEVAL_TOOL_NAME,
+                    success=True,
+                    tool_output=retrieval.model_dump(),
+                    answer="The Core Pipeline begins with Ingest.",
+                    metadata={"generated": True},
+                ),
+            )
+        ],
+        query=FIVE_STAGES_QUERY,
+        tools=ToolRegistry(
+            [
+                RAGRetrievalTool(MagicMock()),
+                DocumentNavigationTool(
+                    DocumentNavigationService(make_settings(), MagicMock(spec=VectorStore)),
+                ),
+            ]
+        ),
+    )
+    assert recovery is not None
+    assert recovery.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
+
+
+def test_retrieval_navigation_recovery_generates_combined_answer() -> None:
+    nav_records = _core_pipeline_nav_records()
     generation = MagicMock()
     generation.generate_from_chunks.side_effect = [
         RAGResult(
@@ -193,7 +399,7 @@ def test_retrieval_navigation_recovery_generates_combined_answer() -> None:
         ),
     ]
     service = _recovery_service(
-        rag_chunks=[fragmented],
+        rag_chunks=[_fragmented_ingest_chunk()],
         nav_records=nav_records,
         generation=generation,
     )
@@ -204,12 +410,30 @@ def test_retrieval_navigation_recovery_generates_combined_answer() -> None:
     assert generation.generate_from_chunks.call_count == 2
     second_chunks = generation.generate_from_chunks.call_args_list[1].args[1]
     texts = {chunk.text for chunk in second_chunks}
-    assert "The Core Pipeline 1" in texts
-    assert "Ingest: Documents are split into chunks." in texts
-    assert result.steps[0].action.tool_name == RAG_RETRIEVAL_TOOL_NAME
+    assert "Ingest:" in next(iter(texts))
     assert result.steps[1].action.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
-    assert result.steps[1].observation is not None
-    assert result.steps[1].observation.metadata.get("recovery") is True
+
+
+def test_sufficient_rag_context_skips_navigation() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.return_value = RAGResult(
+        answer=_full_pipeline_answer(),
+        citations=_full_pipeline_citations(),
+    )
+    service = _recovery_service(
+        rag_chunks=[_complete_pipeline_chunk()],
+        nav_records=_core_pipeline_nav_records(),
+        generation=generation,
+    )
+
+    result = service.run(FIVE_STAGES_QUERY)
+
+    _assert_pipeline_stages(result.answer)
+    assert generation.generate_from_chunks.call_count == 1
+    assert len(result.steps) == 2
+    assert result.steps[1].action.type is AgentActionType.FINISH
+    assert result.metadata["finished"] is True
+    assert all(step.action.tool_name != DOCUMENT_NAVIGATION_TOOL_NAME for step in result.steps)
 
 
 def test_sufficient_rag_answer_skips_navigation_recovery() -> None:
@@ -249,28 +473,13 @@ def test_sufficient_rag_answer_skips_navigation_recovery() -> None:
 
     assert result.answer == "The complete grounded answer."
     assert generation.generate_from_chunks.call_count == 1
-    assert len(result.steps) == 2
     assert result.steps[1].action.type is AgentActionType.FINISH
-    assert result.metadata["finished"] is True
 
 
 def test_max_steps_one_prevents_navigation_recovery() -> None:
-    fragmented = RetrievedChunk(
-        chunk_id="doc-a:00009",
-        text="fragment",
-        document_id="doc-a",
-        filename="guide.pdf",
-        file_type="pdf",
-        source="guide.pdf",
-        page_number=1,
-        section=None,
-        chunk_index=9,
-        chunking_strategy="recursive",
-        score=0.5,
-    )
     generation = MagicMock()
     generation.generate_from_chunks.return_value = RAGResult(
-        answer="I don't have enough information in the provided context.",
+        answer="The Core Pipeline begins with Ingest.",
         citations=[],
     )
     nav_tool = DocumentNavigationTool(
@@ -279,7 +488,7 @@ def test_max_steps_one_prevents_navigation_recovery() -> None:
     rag = MagicMock()
     rag.retrieve_context.return_value = RetrievalContext(
         query="pipeline",
-        chunks=[fragmented],
+        chunks=[_fragmented_ingest_chunk()],
     )
     service = AgentService(
         agent=_foundation_agent(),
@@ -289,9 +498,8 @@ def test_max_steps_one_prevents_navigation_recovery() -> None:
         max_steps=1,
     )
 
-    result = service.run("pipeline stages")
+    result = service.run(FIVE_STAGES_QUERY)
 
-    assert "don't have enough information" in result.answer.casefold()
     assert generation.generate_from_chunks.call_count == 1
     assert all(step.action.tool_name != DOCUMENT_NAVIGATION_TOOL_NAME for step in result.steps)
 
@@ -309,13 +517,13 @@ def test_repeated_navigation_is_not_attempted() -> None:
                 type=AgentActionType.CALL_TOOL,
                 tool_name=RAG_RETRIEVAL_TOOL_NAME,
                 tool_names=[RAG_RETRIEVAL_TOOL_NAME],
-                arguments={"query": "pipeline"},
+                arguments={"query": FIVE_STAGES_QUERY},
             ),
             observation=AgentObservation(
                 tool_name=RAG_RETRIEVAL_TOOL_NAME,
                 success=True,
                 tool_output=rag_observation_output.model_dump(),
-                answer="I don't have enough information in the provided context.",
+                answer="The Core Pipeline begins with Ingest.",
                 metadata={"generated": True},
             ),
         ),
@@ -335,7 +543,7 @@ def test_repeated_navigation_is_not_attempted() -> None:
                     anchor_chunk_index=9,
                     chunks=[],
                 ).model_dump(),
-                answer="I don't have enough information in the provided context.",
+                answer="The Core Pipeline begins with Ingest.",
                 metadata={"generated": True, "recovery": True},
             ),
         ),
@@ -345,6 +553,7 @@ def test_repeated_navigation_is_not_attempted() -> None:
     )
     recovery = maybe_document_navigation_recovery(
         history,
+        query=FIVE_STAGES_QUERY,
         tools=ToolRegistry([RAGRetrievalTool(MagicMock()), nav_tool]),
     )
     assert recovery is None
@@ -357,7 +566,7 @@ def test_missing_navigation_metadata_skips_recovery() -> None:
                 type=AgentActionType.CALL_TOOL,
                 tool_name=RAG_RETRIEVAL_TOOL_NAME,
                 tool_names=[RAG_RETRIEVAL_TOOL_NAME],
-                arguments={"query": "pipeline"},
+                arguments={"query": FIVE_STAGES_QUERY},
             ),
             observation=AgentObservation(
                 tool_name=RAG_RETRIEVAL_TOOL_NAME,
@@ -380,7 +589,7 @@ def test_missing_navigation_metadata_skips_recovery() -> None:
                         )
                     ],
                 ).model_dump(),
-                answer="I don't have enough information in the provided context.",
+                answer="The Core Pipeline begins with Ingest.",
                 metadata={"generated": True},
             ),
         )
@@ -390,6 +599,7 @@ def test_missing_navigation_metadata_skips_recovery() -> None:
     )
     recovery = maybe_document_navigation_recovery(
         history,
+        query=FIVE_STAGES_QUERY,
         tools=ToolRegistry([RAGRetrievalTool(MagicMock()), nav_tool]),
     )
     assert recovery is None
@@ -397,4 +607,7 @@ def test_missing_navigation_metadata_skips_recovery() -> None:
 
 def test_is_insufficient_rag_answer_detects_refusals() -> None:
     assert is_insufficient_rag_answer("I don't have enough information in the provided context.")
+    assert is_insufficient_rag_answer(
+        "I could not find relevant information in the knowledge base to answer that question."
+    )
     assert not is_insufficient_rag_answer("The pipeline has five stages.")

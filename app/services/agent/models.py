@@ -220,6 +220,49 @@ class CalculatorOutput(BaseModel):
         return 1
 
 
+class DocumentNavigationInput(BaseModel):
+    """Structured input for metadata-based document navigation."""
+
+    document_id: str = Field(min_length=1, max_length=256)
+    chunk_id: str | None = Field(default=None, max_length=256)
+    chunk_index: int | None = Field(default=None, ge=0)
+    page_number: int | None = Field(default=None, ge=1)
+    window: int | None = Field(default=None, ge=0, le=5)
+    limit: int | None = Field(default=None, gt=0, le=20)
+
+    @field_validator("document_id", "chunk_id")
+    @classmethod
+    def strip_required_strings(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @model_validator(mode="after")
+    def require_navigation_anchor(self) -> DocumentNavigationInput:
+        if self.chunk_id is None and self.chunk_index is None and self.page_number is None:
+            msg = "At least one of chunk_id, chunk_index, or page_number is required"
+            raise ValueError(msg)
+        return self
+
+
+class DocumentNavigationOutput(BaseModel):
+    """Structured nearby chunks from the same document."""
+
+    document_id: str
+    anchor_chunk_id: str | None = None
+    anchor_chunk_index: int | None = None
+    chunks: list[RetrievedChunkOutput] = Field(default_factory=list)
+
+    @property
+    def result_count(self) -> int:
+        return len(self.chunks)
+
+    @property
+    def empty(self) -> bool:
+        return not self.chunks
+
+
 class RoutingDecision(BaseModel):
     """Validated tool routing plan for a user query."""
 

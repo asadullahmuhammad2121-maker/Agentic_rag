@@ -5,6 +5,7 @@ from __future__ import annotations
 from app.services.agent.generation.calculator import format_calculator_evidence
 from app.services.agent.models import (
     CalculatorOutput,
+    DocumentNavigationOutput,
     RAGRetrievalOutput,
     TavilySearchOutput,
     WebSearchResultItem,
@@ -18,11 +19,14 @@ def merge_tool_outputs_to_chunks(
     rag_output: RAGRetrievalOutput | None,
     web_output: TavilySearchOutput | None,
     calculator_output: CalculatorOutput | None = None,
+    navigation_output: DocumentNavigationOutput | None = None,
 ) -> list[RetrievedChunk]:
-    """Combine RAG chunks, web results, and calculator evidence into one context."""
+    """Combine RAG chunks, navigation chunks, web results, and calculator evidence."""
     chunks: list[RetrievedChunk] = []
     if rag_output is not None:
         chunks.extend(output_to_chunk(chunk) for chunk in rag_output.chunks)
+    if navigation_output is not None:
+        chunks.extend(output_to_chunk(chunk) for chunk in navigation_output.chunks)
     if web_output is not None:
         offset = len(chunks)
         for index, result in enumerate(web_output.results):

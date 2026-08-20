@@ -10,8 +10,8 @@ from pydantic import BaseModel
 from app.core.exceptions import ConfigurationError, QdrantConnectionError, QueryError
 from app.services.agent.models import RAGRetrievalInput, RAGRetrievalOutput, ToolResult
 from app.services.agent.tools.base import Tool
-from app.services.agent.tools.converters import tool_result_to_observation
 from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
+from app.services.agent.tools.converters import tool_result_to_observation
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME, RAGRetrievalTool
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.rag.service import RetrievalContext
@@ -180,12 +180,22 @@ def test_rag_tool_returns_empty_retrieval_output() -> None:
 
 
 def test_registry_includes_calculator_when_enabled() -> None:
-    from app.api.deps import get_calculator_tool, get_rag_retrieval_tool, get_tool_registry
+    from app.api.deps import (
+        get_calculator_tool,
+        get_document_navigation_tool,
+        get_rag_retrieval_tool,
+        get_tool_registry,
+    )
+    from app.services.retrieval.document_navigation import DocumentNavigationService
+    from app.vector_store.base import VectorStore
 
     settings = make_settings(calculator_enabled=True)
     rag_tool = get_rag_retrieval_tool(MagicMock())
+    navigation_tool = get_document_navigation_tool(
+        DocumentNavigationService(settings, MagicMock(spec=VectorStore)),
+    )
     calculator_tool = get_calculator_tool(settings)
-    registry = get_tool_registry(rag_tool, None, calculator_tool)
+    registry = get_tool_registry(rag_tool, navigation_tool, None, calculator_tool)
     assert CALCULATOR_TOOL_NAME in registry
 
 

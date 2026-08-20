@@ -12,12 +12,14 @@ from app.schemas.settings import (
     ToolStatusResponse,
 )
 from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
+from app.services.agent.tools.document_navigation import DOCUMENT_NAVIGATION_TOOL_NAME
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME
 
 _TOOL_LABELS = {
     RAG_RETRIEVAL_TOOL_NAME: "RAG Retrieval",
+    DOCUMENT_NAVIGATION_TOOL_NAME: "Document Navigation",
     TAVILY_WEB_SEARCH_TOOL_NAME: "Tavily Web Search",
     CALCULATOR_TOOL_NAME: "Calculator",
 }
@@ -33,6 +35,13 @@ def build_public_settings(settings: Settings, tools: ToolRegistry) -> PublicSett
             enabled=True,
             configured=True,
             available=RAG_RETRIEVAL_TOOL_NAME in registered,
+        ),
+        ToolStatusResponse(
+            name=DOCUMENT_NAVIGATION_TOOL_NAME,
+            label=_TOOL_LABELS[DOCUMENT_NAVIGATION_TOOL_NAME],
+            enabled=True,
+            configured=True,
+            available=DOCUMENT_NAVIGATION_TOOL_NAME in registered,
         ),
         ToolStatusResponse(
             name=TAVILY_WEB_SEARCH_TOOL_NAME,

@@ -11,6 +11,7 @@ from app.services.agent.base import Agent
 from app.services.agent.models import AgentAction, AgentActionType, AgentRequest, AgentStep
 from app.services.agent.planning.fallback import should_attempt_decomposition
 from app.services.agent.planning.planner import QueryPlanner
+from app.services.agent.recovery.navigation import maybe_document_navigation_recovery
 from app.services.agent.routing.router import QueryRouter
 from app.services.agent.tools.registry import ToolRegistry
 
@@ -43,6 +44,17 @@ class FoundationAgent(Agent):
         history: Sequence[AgentStep],
     ) -> AgentAction:
         if history:
+            recovery = maybe_document_navigation_recovery(history, tools=tools)
+            if recovery is not None:
+                logger.info(
+                    "agent_document_navigation_recovery_selected",
+                    extra={
+                        "operation": "agent_decide",
+                        "document_id": recovery.arguments.get("document_id"),
+                        "chunk_id": recovery.arguments.get("chunk_id"),
+                    },
+                )
+                return recovery
             return self._finish_from_history(history)
 
         if should_attempt_decomposition(

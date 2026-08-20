@@ -17,6 +17,7 @@ from app.services.agent.runs.store import AgentRunStore
 from app.services.agent.service import AgentService
 from app.services.agent.tools.base import Tool
 from app.services.agent.tools.calculator import CalculatorTool
+from app.services.agent.tools.document_navigation import DocumentNavigationTool
 from app.services.agent.tools.rag import RAGRetrievalTool
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.context_optimization.service import ContextOptimizationService
@@ -27,6 +28,7 @@ from app.services.llm.base import LLMService
 from app.services.llm.groq import GroqLLMService
 from app.services.query_transformation.service import QueryTransformationService
 from app.services.rag.service import RAGService
+from app.services.retrieval.document_navigation import DocumentNavigationService
 from app.services.retrieval.explorer import RetrievalExplorerService
 from app.services.retrieval.hybrid import HybridRetrievalService
 from app.services.retrieval.keyword.bm25 import BM25KeywordSearch
@@ -223,13 +225,32 @@ def get_calculator_tool(
     return CalculatorTool(settings)
 
 
+def get_document_navigation_service(
+    settings: Annotated[Settings, Depends(get_settings)],
+    vector_store: Annotated[VectorStore, Depends(get_vector_store)],
+) -> DocumentNavigationService:
+    """Provide metadata-based document navigation."""
+    return DocumentNavigationService(settings, vector_store)
+
+
+def get_document_navigation_tool(
+    navigation_service: Annotated[
+        DocumentNavigationService,
+        Depends(get_document_navigation_service),
+    ],
+) -> DocumentNavigationTool:
+    """Provide the document navigation tool."""
+    return DocumentNavigationTool(navigation_service)
+
+
 def get_tool_registry(
     rag_tool: Annotated[RAGRetrievalTool, Depends(get_rag_retrieval_tool)],
+    navigation_tool: Annotated[DocumentNavigationTool, Depends(get_document_navigation_tool)],
     tavily_tool: Annotated[Tool | None, Depends(get_tavily_web_search_tool)],
     calculator_tool: Annotated[Tool | None, Depends(get_calculator_tool)],
 ) -> ToolRegistry:
-    """Provide the agent tool registry (RAG plus optional Tavily and calculator)."""
-    tools: list[Tool] = [rag_tool]
+    """Provide the agent tool registry."""
+    tools: list[Tool] = [rag_tool, navigation_tool]
     if tavily_tool is not None:
         tools.append(tavily_tool)
     if calculator_tool is not None:

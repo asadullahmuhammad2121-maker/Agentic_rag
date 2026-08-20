@@ -17,15 +17,18 @@ from app.services.agent.models import (
     AgentStep,
     AgentTask,
     CalculatorOutput,
+    DocumentNavigationOutput,
     RAGRetrievalOutput,
     TavilySearchOutput,
 )
+from app.services.agent.recovery.navigation import prior_rag_observation
 from app.services.agent.tools.calculator import CALCULATOR_TOOL_NAME
 from app.services.agent.tools.converters import (
     citations_from_rag,
     output_to_chunk,
     tool_result_to_observation,
 )
+from app.services.agent.tools.document_navigation import DOCUMENT_NAVIGATION_TOOL_NAME
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.agent.tools.tavily import TAVILY_WEB_SEARCH_TOOL_NAME
@@ -99,7 +102,7 @@ class AgentService:
                 return result
 
             observation = self._execute_action(action)
-            observation = self._generate_answer(request, observation)
+            observation = self._generate_answer(request, observation, history=history)
             history.append(AgentStep(action=action, observation=observation))
 
         result = self._result_from_history(history)
@@ -175,8 +178,7 @@ class AgentService:
         failed = [observation for observation in observations if not observation.success]
         if not successful:
             errors = {
-                observation.tool_name: observation.error or "tool failed"
-                for observation in failed
+                observation.tool_name: observation.error or "tool failed" for observation in failed
             }
             return AgentObservation(
                 tool_name="+".join(observation.tool_name for observation in observations),
@@ -204,8 +206,7 @@ class AgentService:
         if failed:
             metadata["partial_success"] = True
             metadata["errors"] = {
-                observation.tool_name: observation.error or "tool failed"
-                for observation in failed
+                observation.tool_name: observation.error or "tool failed" for observation in failed
             }
         return AgentObservation(
             tool_name="+".join(tool_names),
@@ -246,9 +247,16 @@ class AgentService:
         self,
         request: AgentRequest,
         observation: AgentObservation,
+        *,
+        history: list[AgentStep],
     ) -> AgentObservation:
         if not observation.success:
             return observation
+        if (
+            observation.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
+            and prior_rag_observation(history) is not None
+        ):
+            return self._generate_from_rag_navigation_recovery(request, observation, history)
         if observation.metadata.get("multi_tool"):
             return self._generate_from_combined(request, observation)
         if observation.tool_name == RAG_RETRIEVAL_TOOL_NAME:
@@ -257,6 +265,8 @@ class AgentService:
             return self._generate_from_web(request, observation)
         if observation.tool_name == CALCULATOR_TOOL_NAME:
             return self._generate_from_calculator(request, observation)
+        if observation.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME:
+            return self._generate_from_document_navigation(request, observation)
         return observation
 
     def _generate_from_combined(
@@ -274,6 +284,7 @@ class AgentService:
         rag_output: RAGRetrievalOutput | None = None
         web_output: TavilySearchOutput | None = None
         calculator_output: CalculatorOutput | None = None
+        navigation_output: DocumentNavigationOutput | None = None
         for tool_name, payload in tool_outputs.items():
             if payload is None:
                 continue
@@ -283,8 +294,15 @@ class AgentService:
                 web_output = TavilySearchOutput.model_validate(payload)
             elif tool_name == CALCULATOR_TOOL_NAME:
                 calculator_output = CalculatorOutput.model_validate(payload)
+            elif tool_name == DOCUMENT_NAVIGATION_TOOL_NAME:
+                navigation_output = DocumentNavigationOutput.model_validate(payload)
 
-        if rag_output is not None and web_output is None and calculator_output is None:
+        if (
+            rag_output is not None
+            and web_output is None
+            and calculator_output is None
+            and navigation_output is None
+        ):
             single = observation.model_copy(
                 update={
                     "tool_name": RAG_RETRIEVAL_TOOL_NAME,
@@ -302,7 +320,12 @@ class AgentService:
             )
             generated = self._generate_from_web(request, single)
             return self._with_multi_tool_metadata(generated, observation)
-        if calculator_output is not None and rag_output is None and web_output is None:
+        if (
+            calculator_output is not None
+            and rag_output is None
+            and web_output is None
+            and navigation_output is None
+        ):
             single = observation.model_copy(
                 update={
                     "tool_name": CALCULATOR_TOOL_NAME,
@@ -316,6 +339,7 @@ class AgentService:
             rag_output=rag_output,
             web_output=web_output,
             calculator_output=calculator_output,
+            navigation_output=navigation_output,
         )
         logger.info(
             "agent_generation_started",
@@ -516,6 +540,120 @@ class AgentService:
             }
         )
 
+    def _generate_from_document_navigation(
+        self,
+        request: AgentRequest,
+        observation: AgentObservation,
+    ) -> AgentObservation:
+        if observation.tool_output is None:
+            raise AgentError(
+                "Document navigation succeeded without structured output",
+                details={"reason": "missing_tool_output", "tool_name": observation.tool_name},
+            )
+
+        navigation = DocumentNavigationOutput.model_validate(observation.tool_output)
+        chunks = [output_to_chunk(chunk) for chunk in navigation.chunks]
+        logger.info(
+            "agent_generation_started",
+            extra={
+                "operation": "agent_run",
+                "tool_name": observation.tool_name,
+                "result_count": navigation.result_count,
+                "empty": navigation.empty,
+            },
+        )
+        rag_result = self._rag.generate_from_chunks(request.query, chunks)
+        citations = citations_from_rag(rag_result.citations)
+        logger.info(
+            "agent_generation_completed",
+            extra={
+                "operation": "agent_run",
+                "tool_name": observation.tool_name,
+                "citation_count": len(citations),
+                "answer_length": len(rag_result.answer),
+            },
+        )
+        metadata = dict(observation.metadata)
+        metadata.update(
+            {
+                "generated": True,
+                "citation_count": len(citations),
+                "empty_retrieval": navigation.empty,
+            }
+        )
+        return observation.model_copy(
+            update={
+                "answer": rag_result.answer,
+                "citations": citations,
+                "metadata": metadata,
+            }
+        )
+
+    def _generate_from_rag_navigation_recovery(
+        self,
+        request: AgentRequest,
+        observation: AgentObservation,
+        history: list[AgentStep],
+    ) -> AgentObservation:
+        rag_observation = prior_rag_observation(history)
+        if rag_observation is None or rag_observation.tool_output is None:
+            raise AgentError(
+                "Document navigation recovery is missing prior RAG output",
+                details={"reason": "missing_prior_rag_output"},
+            )
+        if observation.tool_output is None:
+            raise AgentError(
+                "Document navigation succeeded without structured output",
+                details={"reason": "missing_tool_output", "tool_name": observation.tool_name},
+            )
+
+        rag_output = RAGRetrievalOutput.model_validate(rag_observation.tool_output)
+        navigation_output = DocumentNavigationOutput.model_validate(observation.tool_output)
+        chunks = merge_tool_outputs_to_chunks(
+            rag_output=rag_output,
+            web_output=None,
+            calculator_output=None,
+            navigation_output=navigation_output,
+        )
+        logger.info(
+            "agent_recovery_generation_started",
+            extra={
+                "operation": "agent_run",
+                "rag_chunk_count": rag_output.result_count,
+                "navigation_chunk_count": navigation_output.result_count,
+                "combined_chunk_count": len(chunks),
+            },
+        )
+        rag_result = self._rag.generate_from_chunks(request.query, chunks)
+        citations = citations_from_rag(rag_result.citations)
+        logger.info(
+            "agent_recovery_generation_completed",
+            extra={
+                "operation": "agent_run",
+                "citation_count": len(citations),
+                "answer_length": len(rag_result.answer),
+            },
+        )
+        metadata = dict(observation.metadata)
+        metadata.update(
+            {
+                "generated": True,
+                "citation_count": len(citations),
+                "empty_retrieval": not chunks,
+                "recovery": True,
+                "recovery_tools": [RAG_RETRIEVAL_TOOL_NAME, DOCUMENT_NAVIGATION_TOOL_NAME],
+            }
+        )
+        return observation.model_copy(
+            update={
+                "answer": rag_result.answer,
+                "citations": citations,
+                "metadata": metadata,
+                "tool_name": f"{RAG_RETRIEVAL_TOOL_NAME}+{DOCUMENT_NAVIGATION_TOOL_NAME}",
+                "tool_names": [RAG_RETRIEVAL_TOOL_NAME, DOCUMENT_NAVIGATION_TOOL_NAME],
+            }
+        )
+
     def _result_from_finish(
         self,
         action: AgentAction,
@@ -564,7 +702,8 @@ class AgentService:
                 "step_count": len(history),
                 "finished": False,
                 "max_steps_reached": True,
-                "tool_names": observation.tool_names or list(observation.metadata.get("tools_used", [])),
+                "tool_names": observation.tool_names
+                or list(observation.metadata.get("tools_used", [])),
                 **observation.metadata,
             },
         )

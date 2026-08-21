@@ -140,6 +140,18 @@ class _IndexedVectorStore:
         document_id = conditions.get("document_id")
         chunk_index = conditions.get("chunk_index")
         chunk_id = conditions.get("chunk_id")
+        page_number = conditions.get("page_number")
+        if page_number is not None and document_id is not None:
+            matches = [
+                payload
+                for (doc_id, _index), payload in self._records.items()
+                if doc_id == document_id and payload.get("page_number") == page_number
+            ]
+            matches.sort(key=lambda payload: int(payload["chunk_index"]))
+            return [
+                SearchResult(id=payload["chunk_id"], score=1.0, payload=payload)
+                for payload in matches[:limit]
+            ]
         if chunk_id is not None and document_id is not None:
             for (doc_id, _index), payload in self._records.items():
                 if doc_id == document_id and payload["chunk_id"] == chunk_id:
@@ -410,7 +422,7 @@ def test_retrieval_navigation_recovery_generates_combined_answer() -> None:
     assert generation.generate_from_chunks.call_count == 2
     second_chunks = generation.generate_from_chunks.call_args_list[1].args[1]
     texts = {chunk.text for chunk in second_chunks}
-    assert "Ingest:" in next(iter(texts))
+    assert any("Ingest:" in text for text in texts)
     assert result.steps[1].action.tool_name == DOCUMENT_NAVIGATION_TOOL_NAME
 
 

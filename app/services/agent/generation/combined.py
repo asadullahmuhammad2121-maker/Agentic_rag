@@ -33,7 +33,18 @@ def merge_tool_outputs_to_chunks(
             chunks.append(_web_result_to_chunk(result, chunk_index=offset + index))
     if calculator_output is not None:
         chunks.append(_calculator_to_chunk(calculator_output, chunk_index=len(chunks)))
-    return chunks
+    return _dedupe_chunks(chunks)
+
+
+def _dedupe_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    seen: set[str] = set()
+    deduped: list[RetrievedChunk] = []
+    for chunk in chunks:
+        if chunk.chunk_id in seen:
+            continue
+        seen.add(chunk.chunk_id)
+        deduped.append(chunk)
+    return deduped
 
 
 def _web_result_to_chunk(result: WebSearchResultItem, *, chunk_index: int) -> RetrievedChunk:

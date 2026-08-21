@@ -32,9 +32,41 @@ _INSUFFICIENT_ANSWER_MARKERS: tuple[str, ...] = (
     "unable to determine",
 )
 
-_STAGE_LABEL_PATTERN = re.compile(
-    r"(?:^|\n)\s*(?:\d+[.)]\s*)?([A-Z][A-Za-z]+)\s*:",
-    re.MULTILINE,
+_NUMBERED_LIST_ITEM = re.compile(r"(?:^|\n)\s*\d+[.)]\s+\S", re.MULTILINE)
+_LABEL_LIST_ITEM = re.compile(r"(?:^|\n)\s*[A-Za-z][\w\s\-]{0,80}:\s+\S", re.MULTILINE)
+_STAGE_COUNT_PATTERN = re.compile(
+    r"\b(?:"
+    r"one|two|three|four|five|six|seven|eight|nine|ten|\d+"
+    r")\s+stages?\b",
+    re.IGNORECASE,
+)
+
+_WORD_STAGE_COUNTS: dict[str, int] = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
+
+_ENUMERATION_QUERY_MARKERS: tuple[str, ...] = (
+    "what are the stage",
+    "what are all the stage",
+    "list all",
+    "list the stage",
+    "name the stage",
+    "name all",
+    "identify the stage",
+    "identify all",
+    "each stage",
+    "all stage",
+    "every stage",
+    "stages of the",
 )
 
 _CONTINUATION_QUERY_MARKERS: tuple[str, ...] = (
@@ -50,17 +82,14 @@ _CONTINUATION_QUERY_MARKERS: tuple[str, ...] = (
     " comes after ",
 )
 
-_ENUMERATION_QUERY_MARKERS: tuple[str, ...] = (
-    "five stage",
-    "all stage",
-    "each stage",
-    "what are the stage",
-    "list the stage",
-    "name the stage",
-    "identify the stage",
-    "stages of the core pipeline",
-    "stages of the pipeline",
+_FIRST_ITEM_QUERY_MARKERS: tuple[str, ...] = (
+    "first stage",
+    "initial stage",
+    "starting stage",
+    "begin with",
 )
+
+_BROAD_NAVIGATION_LIMIT = 20
 
 
 def maybe_document_navigation_recovery(
@@ -93,18 +122,24 @@ def maybe_document_navigation_recovery(
     if retrieval is None:
         return None
 
-    anchor = _select_navigation_anchor(retrieval.chunks)
+    anchor = _select_navigation_anchor(query, retrieval.chunks)
     if anchor is None:
         return None
+
+    arguments: dict[str, str | int] = {
+        "document_id": anchor.document_id,
+    }
+    if _query_needs_broad_navigation(query):
+        arguments["page_number"] = anchor.page_number if anchor.page_number >= 1 else 1
+        arguments["limit"] = _BROAD_NAVIGATION_LIMIT
+    else:
+        arguments["chunk_id"] = anchor.chunk_id
 
     return AgentAction(
         type=AgentActionType.CALL_TOOL,
         tool_name=DOCUMENT_NAVIGATION_TOOL_NAME,
         tool_names=[DOCUMENT_NAVIGATION_TOOL_NAME],
-        arguments={
-            "document_id": anchor.document_id,
-            "chunk_id": anchor.chunk_id,
-        },
+        arguments=arguments,
         reasoning="Retrieved context appears incomplete; fetching nearby document chunks.",
     )
 
@@ -158,22 +193,26 @@ def retrieval_likely_incomplete_for_query(
     if not combined.strip():
         return False
 
-    context_stages = _stage_labels_in_text(combined)
+    list_items = _list_item_count_in_text(combined)
+
     if _query_expects_stage_enumeration(query):
         expected = _expected_stage_count(query)
-        if expected is not None and len(context_stages) < expected:
+        if expected is not None and list_items < expected:
             return True
-        if expected is None and len(context_stages) < 2:
+        if expected is None and list_items < 2:
             return True
 
+    if _query_expects_first_item(query) and list_items < 1:
+        return True
+
     if _query_expects_stage_continuation(query):
-        if len(context_stages) <= 1:
+        if list_items <= 1:
             return True
         anchor = _stage_anchor_from_query(query)
-        if anchor is not None and anchor in {stage.casefold() for stage in context_stages}:
-            if _query_expects_immediate_successor(query) and len(context_stages) < 2:
+        if anchor is not None:
+            if _query_expects_immediate_successor(query) and list_items < 2:
                 return True
-            if _query_expects_ordered_sequence(query) and len(context_stages) < 3:
+            if _query_expects_ordered_sequence(query) and list_items < 3:
                 return True
 
     return False
@@ -197,29 +236,35 @@ def _answer_satisfies_query(query: str, answer: str | None) -> bool:
     if not answer:
         return False
 
-    answer_stages = _stage_labels_in_text(answer)
+    answer_items = _list_item_count_in_text(answer)
     if _query_expects_stage_enumeration(query):
         expected = _expected_stage_count(query)
         if expected is not None:
-            return len(answer_stages) >= expected
-        return len(answer_stages) >= 5
+            return answer_items >= expected
+        return answer_items >= 3
 
-    normalized_query = query.casefold()
+    if _query_expects_first_item(query):
+        return answer_items >= 1 and not is_insufficient_rag_answer(answer)
+
     if _query_expects_immediate_successor(query):
-        anchor = _stage_anchor_from_query(query)
-        if anchor == "ingest":
-            return "store" in answer.casefold()
-        return len(answer_stages) >= 2
+        return answer_items >= 2
 
-    if _query_expects_ordered_sequence(query) and "starting from ingest" in normalized_query:
-        return len(answer_stages) >= 3
+    if _query_expects_ordered_sequence(query):
+        return answer_items >= 3
 
     return False
 
 
 def _query_expects_stage_enumeration(query: str) -> bool:
     normalized = query.casefold()
+    if _STAGE_COUNT_PATTERN.search(normalized):
+        return True
     return any(marker in normalized for marker in _ENUMERATION_QUERY_MARKERS)
+
+
+def _query_expects_first_item(query: str) -> bool:
+    normalized = query.casefold()
+    return any(marker in normalized for marker in _FIRST_ITEM_QUERY_MARKERS)
 
 
 def _query_expects_stage_continuation(query: str) -> bool:
@@ -241,11 +286,23 @@ def _query_expects_ordered_sequence(query: str) -> bool:
     return "in order" in normalized or "next stages" in normalized
 
 
+def _query_needs_broad_navigation(query: str) -> bool:
+    return (
+        _query_expects_stage_enumeration(query)
+        or _query_expects_first_item(query)
+        or _query_expects_ordered_sequence(query)
+    )
+
+
 def _expected_stage_count(query: str) -> int | None:
     normalized = query.casefold()
-    if "five stage" in normalized:
-        return 5
-    return None
+    match = _STAGE_COUNT_PATTERN.search(normalized)
+    if match is None:
+        return None
+    token = match.group(0).split()[0]
+    if token.isdigit():
+        return int(token)
+    return _WORD_STAGE_COUNTS.get(token)
 
 
 def _stage_anchor_from_query(query: str) -> str | None:
@@ -261,8 +318,10 @@ def _stage_anchor_from_query(query: str) -> str | None:
     return None
 
 
-def _stage_labels_in_text(text: str) -> set[str]:
-    return {match.group(1) for match in _STAGE_LABEL_PATTERN.finditer(text)}
+def _list_item_count_in_text(text: str) -> int:
+    numbered = len(_NUMBERED_LIST_ITEM.findall(text))
+    labels = len(_LABEL_LIST_ITEM.findall(text))
+    return max(numbered, labels)
 
 
 def _combined_chunk_text(chunks: Sequence[RetrievedChunkOutput]) -> str:
@@ -292,8 +351,21 @@ def _parse_rag_output(observation: AgentObservation) -> RAGRetrievalOutput | Non
         return None
 
 
-def _select_navigation_anchor(chunks: list[RetrievedChunkOutput]) -> RetrievedChunkOutput | None:
+def _select_navigation_anchor(
+    query: str,
+    chunks: list[RetrievedChunkOutput],
+) -> RetrievedChunkOutput | None:
     candidates = [chunk for chunk in chunks if chunk.document_id.strip() and chunk.chunk_id.strip()]
     if not candidates:
         return None
+
+    if _query_expects_first_item(query):
+        return min(candidates, key=lambda chunk: chunk.chunk_index)
+
+    if _query_expects_stage_enumeration(query) or _query_expects_ordered_sequence(query):
+        return max(
+            candidates,
+            key=lambda chunk: (_list_item_count_in_text(chunk.text), -chunk.chunk_index),
+        )
+
     return max(candidates, key=lambda chunk: chunk.score)

@@ -47,6 +47,34 @@ export async function uploadDocuments(files: File[]): Promise<DocumentUploadResp
   return (await response.json()) as DocumentUploadResponse;
 }
 
+async function parseApiError(response: Response, fallbackCode: string): Promise<ApiError> {
+  let payload: {
+    error?: string;
+    message?: string;
+    details?: Record<string, unknown>;
+  } = {};
+  try {
+    payload = (await response.json()) as typeof payload;
+  } catch {
+    // ignore parse errors
+  }
+  return new ApiError(
+    payload.message ?? `Request failed with status ${response.status}`,
+    response.status,
+    payload.error ?? fallbackCode,
+    payload.details ?? {},
+  );
+}
+
+export async function deleteDocument(documentId: string): Promise<void> {
+  const url = `${getApiBaseUrl()}/documents/${encodeURIComponent(documentId)}`;
+  const response = await fetch(url, { method: "DELETE" });
+
+  if (!response.ok) {
+    throw await parseApiError(response, "delete_failed");
+  }
+}
+
 export const documentQueryKeys = {
   all: ["documents"] as const,
   detail: (documentId: string) => ["documents", documentId] as const,

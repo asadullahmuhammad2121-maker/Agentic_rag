@@ -127,6 +127,23 @@ class DocumentIngestionError(AppError):
         )
 
 
+class DocumentNotFoundError(AppError):
+    """Raised when a requested document is not present in the vector store."""
+
+    def __init__(
+        self,
+        message: str = "Document not found",
+        *,
+        details: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(
+            message,
+            code="document_not_found",
+            status_code=status.HTTP_404_NOT_FOUND,
+            details=details,
+        )
+
+
 class QueryError(AppError):
     """Raised when a RAG query request is invalid."""
 

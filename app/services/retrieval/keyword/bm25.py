@@ -152,6 +152,44 @@ class BM25KeywordSearch(KeywordSearch):
             },
         )
 
+    def remove_document(self, document_id: str) -> int:
+        normalized_id = document_id.strip()
+        if not normalized_id:
+            return 0
+
+        with index_file_lock(
+            self._lock_path,
+            exclusive=True,
+            timeout_seconds=self._lock_timeout_seconds,
+        ):
+            self._reload_if_changed()
+            remaining = [
+                chunk
+                for chunk in self._chunks
+                if str(chunk.payload.get("document_id", "")).strip() != normalized_id
+            ]
+            removed = len(self._chunks) - len(remaining)
+            if removed == 0:
+                return 0
+
+            self._chunks = remaining
+            self._chunk_index_by_id = {
+                chunk.chunk_id: index for index, chunk in enumerate(remaining)
+            }
+            self._rebuild_scorer()
+            self._save_locked()
+
+        logger.info(
+            "keyword_index_document_removed",
+            extra={
+                "operation": "remove_document",
+                "document_id": normalized_id,
+                "chunks_removed": removed,
+                "total_chunks": len(self._chunks),
+            },
+        )
+        return removed
+
     def search(
         self,
         query: str,

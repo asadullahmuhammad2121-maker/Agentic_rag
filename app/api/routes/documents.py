@@ -12,9 +12,10 @@ from app.core.logging import get_logger
 from app.schemas.documents import (
     DocumentBatchIngestItem,
     DocumentBatchIngestResponse,
+    DocumentDeleteResponse,
     DocumentIngestResponse,
 )
-from app.services.ingestion.service import IngestedDocument
+from app.services.ingestion.service import DeletedDocument, IngestedDocument
 from app.utils.filenames import sanitize_upload_filename
 
 logger = get_logger(__name__)
@@ -61,6 +62,16 @@ def _to_batch_item(result: IngestedDocument) -> DocumentBatchIngestItem:
         pages_stored=result.pages_stored,
         chunks_stored=result.chunks_stored,
         status="ingested",
+    )
+
+
+def _to_delete_response(result: DeletedDocument) -> DocumentDeleteResponse:
+    return DocumentDeleteResponse(
+        document_id=result.document_id,
+        chunks_deleted=result.chunks_deleted,
+        checksum=result.checksum,
+        filename=result.filename,
+        status="deleted",
     )
 
 
@@ -159,3 +170,25 @@ async def upload_document(
         total_documents=len(results),
         status="ingested",
     )
+
+
+@router.delete(
+    "/{document_id}",
+    response_model=DocumentDeleteResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Delete an ingested document",
+)
+async def delete_document(
+    document_id: str,
+    ingestion_service: IngestionServiceDep,
+) -> DocumentDeleteResponse:
+    """Remove all vector chunks and deduplication state for a document."""
+    logger.info(
+        "document_delete_received",
+        extra={
+            "operation": "delete_document",
+            "document_id": document_id,
+        },
+    )
+    result = ingestion_service.delete_document(document_id)
+    return _to_delete_response(result)

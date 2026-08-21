@@ -43,3 +43,13 @@ class DocumentBatchIngestResponse(BaseModel):
     documents: list[DocumentBatchIngestItem]
     total_documents: int = Field(ge=1)
     status: Literal["ingested"] = "ingested"
+
+
+class DocumentDeleteResponse(BaseModel):
+    """Response returned after deleting an ingested document."""
+
+    document_id: str
+    chunks_deleted: int = Field(ge=0)
+    checksum: str | None = None
+    filename: str | None = None
+    status: Literal["deleted"] = "deleted"

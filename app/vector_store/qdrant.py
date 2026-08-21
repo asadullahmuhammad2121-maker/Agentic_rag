@@ -280,6 +280,97 @@ class QdrantVectorStore(VectorStore):
                 details={"collection": collection_name},
             ) from exc
 
+    def delete_by_payload(
+        self,
+        collection_name: str,
+        conditions: dict[str, Any],
+    ) -> None:
+        if not conditions:
+            return
+
+        query_filter = build_qdrant_filter(PayloadFilter.from_legacy_dict(conditions))
+        if query_filter is None:
+            return
+
+        try:
+            self._client.delete(
+                collection_name=collection_name,
+                points_selector=qmodels.FilterSelector(filter=query_filter),
+            )
+            logger.info(
+                "qdrant_vectors_deleted_by_payload",
+                extra={
+                    "operation": "delete_by_payload",
+                    "collection": collection_name,
+                    "condition_keys": sorted(conditions),
+                },
+            )
+        except UnexpectedResponse as exc:
+            raise VectorStoreError(
+                "Failed to delete vectors by payload",
+                details={"collection": collection_name},
+            ) from exc
+        except Exception as exc:
+            if _is_connection_error(exc):
+                raise QdrantConnectionError() from exc
+            raise VectorStoreError(
+                "Failed to delete vectors by payload",
+                details={"collection": collection_name},
+            ) from exc
+
+    def count_by_payload(
+        self,
+        collection_name: str,
+        conditions: dict[str, Any],
+    ) -> int:
+        if not conditions:
+            return 0
+
+        query_filter = build_qdrant_filter(PayloadFilter.from_legacy_dict(conditions))
+        if query_filter is None:
+            return 0
+
+        total = 0
+        offset: Any | None = None
+        try:
+            while True:
+                points, offset = self._client.scroll(
+                    collection_name=collection_name,
+                    scroll_filter=query_filter,
+                    limit=100,
+                    offset=offset,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+                total += len(points)
+                if offset is None:
+                    break
+            logger.debug(
+                "qdrant_payload_count_completed",
+                extra={
+                    "operation": "count_by_payload",
+                    "collection": collection_name,
+                    "result_count": total,
+                    "condition_keys": sorted(conditions),
+                },
+            )
+            return total
+        except UnexpectedResponse as exc:
+            raise VectorStoreError(
+                "Payload count failed",
+                details={"collection": collection_name},
+            ) from exc
+        except Exception as exc:
+            if _is_connection_error(exc):
+                raise QdrantConnectionError() from exc
+            message = str(exc).lower()
+            if "not found" in message or "doesn't exist" in message:
+                return 0
+            raise VectorStoreError(
+                "Payload count failed",
+                details={"collection": collection_name},
+            ) from exc
+
     def find_by_payload(
         self,
         collection_name: str,

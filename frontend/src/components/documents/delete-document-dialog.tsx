@@ -37,15 +37,14 @@ export function DeleteDocumentDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Remove document from list?</DialogTitle>
+          <DialogTitle>Delete document?</DialogTitle>
           <DialogDescription className="space-y-2 pt-1">
             <span className="block">
-              This removes <strong>{document?.filename}</strong> from your browser&apos;s document
-              list only.
+              This permanently deletes <strong>{document?.filename}</strong> from the knowledge base,
+              including all indexed chunks and vectors.
             </span>
-            <span className="block text-amber-700">
-              The backend does not expose a delete API yet — vectors and chunks remain in the
-              index until a server-side delete endpoint is added.
+            <span className="block">
+              You can upload the same file again afterward; it will be ingested as a new document.
             </span>
           </DialogDescription>
         </DialogHeader>
@@ -65,10 +64,10 @@ export function DeleteDocumentDialog({
             {deleteMutation.isPending ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
-                Removing...
+                Deleting...
               </>
             ) : (
-              "Remove from list"
+              "Delete document"
             )}
           </Button>
         </DialogFooter>

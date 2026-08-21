@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { documentQueryKeys, uploadDocuments } from "@/lib/api/documents";
+import { documentQueryKeys, deleteDocument, uploadDocuments } from "@/lib/api/documents";
 import { ApiError } from "@/lib/api/client";
 import {
   getStoredDocument,
@@ -79,13 +79,14 @@ export function useDeleteDocument() {
 
   return useMutation({
     mutationFn: async (documentId: string) => {
+      await deleteDocument(documentId);
       removeStoredDocument(documentId);
       return documentId;
     },
     onSuccess: (documentId) => {
       void queryClient.invalidateQueries({ queryKey: documentQueryKeys.all });
       void queryClient.removeQueries({ queryKey: documentQueryKeys.detail(documentId) });
-      toast.success("Document removed from this browser list");
+      toast.success("Document deleted");
     },
     onError: () => {
       toast.error("Could not remove document");

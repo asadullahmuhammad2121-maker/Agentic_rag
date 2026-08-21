@@ -17,6 +17,10 @@ class KeywordSearch(ABC):
         """Add or update chunks in the keyword index."""
 
     @abstractmethod
+    def remove_document(self, document_id: str) -> int:
+        """Remove all chunks belonging to ``document_id``. Returns chunks removed."""
+
+    @abstractmethod
     def search(
         self,
         query: str,

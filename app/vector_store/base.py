@@ -82,6 +82,22 @@ class VectorStore(ABC):
         """Delete vectors by identifier."""
 
     @abstractmethod
+    def delete_by_payload(
+        self,
+        collection_name: str,
+        conditions: dict[str, Any],
+    ) -> None:
+        """Delete all vectors whose payload matches exact key/value conditions."""
+
+    @abstractmethod
+    def count_by_payload(
+        self,
+        collection_name: str,
+        conditions: dict[str, Any],
+    ) -> int:
+        """Count vectors whose payload matches exact key/value conditions."""
+
+    @abstractmethod
     def find_by_payload(
         self,
         collection_name: str,

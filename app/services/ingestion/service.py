@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Final
@@ -10,6 +11,7 @@ from app.core.config import Settings
 from app.core.exceptions import (
     AppError,
     DocumentIngestionError,
+    DocumentNotFoundError,
     DuplicateDocumentError,
     InvalidDocumentError,
 )
@@ -40,6 +42,9 @@ PAYLOAD_INDEX_FIELDS: Final[tuple[str, ...]] = (
     "chunking_strategy",
 )
 
+_checksum_locks_guard = threading.Lock()
+_checksum_locks: dict[str, threading.Lock] = {}
+
 
 @dataclass(slots=True, frozen=True)
 class IngestedDocument:
@@ -55,6 +60,16 @@ class IngestedDocument:
     page_count: int
     pages_stored: int
     chunks_stored: int
+
+
+@dataclass(slots=True, frozen=True)
+class DeletedDocument:
+    """Result of deleting an ingested document."""
+
+    document_id: str
+    chunks_deleted: int
+    checksum: str | None
+    filename: str | None
 
 
 class DocumentIngestionService:
@@ -115,117 +130,15 @@ class DocumentIngestionService:
         self._validate_size(content)
 
         checksum = sha256_digest(content)
-        document_id = new_document_id()
-
-        logger.info(
-            "document_ingestion_started",
-            extra={
-                "operation": "ingest_document",
-                "document_id": document_id,
-                "document_filename": normalized_name,
-                "file_type": file_type,
-                "content_type": normalized_type,
-                "file_size": len(content),
-                "checksum": checksum,
-            },
-        )
-
-        self._ensure_collection()
-        self._reject_duplicate(checksum=checksum, filename=normalized_name)
-
-        parser = self._parser_registry.get_parser(file_type)
-        normalized = parser.parse(content, filename=normalized_name)
-        chunks = self._chunking.chunk_sections(
-            normalized.sections,
-            document_id=document_id,
-            filename=normalized_name,
-            file_type=file_type,
-            source=normalized.source,
-        )
-        if not chunks:
-            raise InvalidDocumentError(
-                "Document contains no extractable text",
-                details={
-                    "reason": "empty_text",
-                    "file_type": file_type,
-                    "page_count": normalized.page_count,
-                },
+        checksum_lock = _checksum_lock_for(checksum)
+        with checksum_lock:
+            return self._ingest_document_locked(
+                filename=normalized_name,
+                content=content,
+                content_type=normalized_type,
+                file_type=file_type,
+                checksum=checksum,
             )
-
-        records = self._build_records(
-            document_id=document_id,
-            filename=normalized_name,
-            content_type=normalized_type,
-            file_type=file_type,
-            source=normalized.source,
-            file_size=len(content),
-            checksum=checksum,
-            normalized=normalized,
-            chunks=chunks,
-        )
-
-        try:
-            self._vector_store.add_vectors(
-                self._settings.qdrant_collection_name,
-                records,
-            )
-        except Exception as exc:
-            if isinstance(exc, AppError):
-                raise
-            logger.error(
-                "document_ingestion_store_failed",
-                extra={
-                    "operation": "ingest_document",
-                    "document_id": document_id,
-                    "error_type": type(exc).__name__,
-                },
-            )
-            raise DocumentIngestionError(
-                "Failed to store document in vector store",
-                details={"document_id": document_id},
-            ) from exc
-
-        if self._keyword_search is not None:
-            try:
-                self._keyword_search.index_records(records)
-            except Exception as exc:
-                logger.warning(
-                    "keyword_index_update_failed",
-                    extra={
-                        "operation": "ingest_document",
-                        "document_id": document_id,
-                        "error_type": type(exc).__name__,
-                    },
-                )
-
-        pages_with_text = len({chunk.page_number for chunk in chunks})
-        result = IngestedDocument(
-            document_id=document_id,
-            filename=normalized_name,
-            content_type=normalized_type,
-            file_type=file_type,
-            file_size=len(content),
-            checksum=checksum,
-            source=normalized.source,
-            page_count=normalized.page_count,
-            pages_stored=max(pages_with_text, 1),
-            chunks_stored=len(records),
-        )
-        logger.info(
-            "document_ingestion_completed",
-            extra={
-                "operation": "ingest_document",
-                "document_id": result.document_id,
-                "document_filename": result.filename,
-                "file_type": result.file_type,
-                "file_size": result.file_size,
-                "checksum": result.checksum,
-                "page_count": result.page_count,
-                "pages_stored": result.pages_stored,
-                "chunks_stored": result.chunks_stored,
-            },
-        )
-        return result
 
     def ingest_documents(
         self,
@@ -242,6 +155,194 @@ class DocumentIngestionService:
                 )
             )
         return results
+
+    def delete_document(self, document_id: str) -> DeletedDocument:
+        """Delete all stored chunks for a document and clear deduplication state."""
+        normalized_id = document_id.strip()
+        if not normalized_id:
+            raise InvalidDocumentError(
+                "Document ID must not be empty",
+                details={"reason": "empty_document_id"},
+            )
+
+        collection = self._settings.qdrant_collection_name
+        existing = self._vector_store.find_by_payload(
+            collection,
+            {"document_id": normalized_id},
+            limit=1,
+        )
+        if not existing:
+            raise DocumentNotFoundError(
+                details={"document_id": normalized_id},
+            )
+
+        checksum = existing[0].payload.get("checksum")
+        filename = existing[0].payload.get("filename")
+        chunk_count = self._vector_store.count_by_payload(
+            collection,
+            {"document_id": normalized_id},
+        )
+
+        logger.info(
+            "document_deletion_started",
+            extra={
+                "operation": "delete_document",
+                "document_id": normalized_id,
+                "chunk_count": chunk_count,
+                "checksum": checksum,
+            },
+        )
+
+        self._vector_store.delete_by_payload(collection, {"document_id": normalized_id})
+
+        keyword_removed = 0
+        if self._keyword_search is not None:
+            keyword_removed = self._keyword_search.remove_document(normalized_id)
+
+        logger.info(
+            "document_deletion_completed",
+            extra={
+                "operation": "delete_document",
+                "document_id": normalized_id,
+                "chunks_deleted": chunk_count,
+                "keyword_chunks_removed": keyword_removed,
+                "checksum": checksum,
+            },
+        )
+        return DeletedDocument(
+            document_id=normalized_id,
+            chunks_deleted=chunk_count,
+            checksum=str(checksum) if checksum is not None else None,
+            filename=str(filename) if filename is not None else None,
+        )
+
+    def _ingest_document_locked(
+        self,
+        *,
+        filename: str,
+        content: bytes,
+        content_type: str,
+        file_type: str,
+        checksum: str,
+    ) -> IngestedDocument:
+        document_id = new_document_id()
+
+        logger.info(
+            "document_ingestion_started",
+            extra={
+                "operation": "ingest_document",
+                "document_id": document_id,
+                "document_filename": filename,
+                "file_type": file_type,
+                "content_type": content_type,
+                "file_size": len(content),
+                "checksum": checksum,
+            },
+        )
+
+        self._ensure_collection()
+        self._reject_duplicate(checksum=checksum, filename=filename)
+
+        parser = self._parser_registry.get_parser(file_type)
+        normalized = parser.parse(content, filename=filename)
+        chunks = self._chunking.chunk_sections(
+            normalized.sections,
+            document_id=document_id,
+            filename=filename,
+            file_type=file_type,
+            source=normalized.source,
+        )
+        if not chunks:
+            raise InvalidDocumentError(
+                "Document contains no extractable text",
+                details={
+                    "reason": "empty_text",
+                    "file_type": file_type,
+                    "page_count": normalized.page_count,
+                },
+            )
+
+        records = self._build_records(
+            document_id=document_id,
+            filename=filename,
+            content_type=content_type,
+            file_type=file_type,
+            source=normalized.source,
+            file_size=len(content),
+            checksum=checksum,
+            normalized=normalized,
+            chunks=chunks,
+        )
+
+        chunk_ids = [str(record.id) for record in records]
+        vectors_stored = False
+        try:
+            self._vector_store.add_vectors(
+                self._settings.qdrant_collection_name,
+                records,
+            )
+            vectors_stored = True
+
+            if self._keyword_search is not None:
+                try:
+                    self._keyword_search.index_records(records)
+                except Exception as exc:
+                    logger.warning(
+                        "keyword_index_update_failed",
+                        extra={
+                            "operation": "ingest_document",
+                            "document_id": document_id,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
+
+            pages_with_text = len({chunk.page_number for chunk in chunks})
+            result = IngestedDocument(
+                document_id=document_id,
+                filename=filename,
+                content_type=content_type,
+                file_type=file_type,
+                file_size=len(content),
+                checksum=checksum,
+                source=normalized.source,
+                page_count=normalized.page_count,
+                pages_stored=max(pages_with_text, 1),
+                chunks_stored=len(records),
+            )
+        except Exception as exc:
+            if vectors_stored:
+                self._rollback_ingestion(document_id=document_id, chunk_ids=chunk_ids)
+                raise
+            if isinstance(exc, AppError):
+                raise
+            logger.error(
+                "document_ingestion_store_failed",
+                extra={
+                    "operation": "ingest_document",
+                    "document_id": document_id,
+                    "error_type": type(exc).__name__,
+                },
+            )
+            raise DocumentIngestionError(
+                "Failed to store document in vector store",
+                details={"document_id": document_id},
+            ) from exc
+
+        logger.info(
+            "document_ingestion_completed",
+            extra={
+                "operation": "ingest_document",
+                "document_id": result.document_id,
+                "document_filename": result.filename,
+                "file_type": result.file_type,
+                "file_size": result.file_size,
+                "checksum": result.checksum,
+                "page_count": result.page_count,
+                "pages_stored": result.pages_stored,
+                "chunks_stored": result.chunks_stored,
+            },
+        )
+        return result
 
     def _validate_size(self, content: bytes) -> None:
         if not content:
@@ -293,6 +394,47 @@ class DocumentIngestionService:
                 "checksum": checksum,
                 "existing_document_id": existing_doc_id,
                 "filename": filename,
+            },
+        )
+
+    def _rollback_ingestion(self, *, document_id: str, chunk_ids: list[str]) -> None:
+        collection = self._settings.qdrant_collection_name
+        try:
+            if chunk_ids:
+                self._vector_store.delete(collection, list(chunk_ids))
+            else:
+                self._vector_store.delete_by_payload(collection, {"document_id": document_id})
+        except Exception as exc:
+            logger.error(
+                "document_ingestion_rollback_failed",
+                extra={
+                    "operation": "rollback_ingestion",
+                    "document_id": document_id,
+                    "chunk_count": len(chunk_ids),
+                    "error_type": type(exc).__name__,
+                },
+            )
+            return
+
+        if self._keyword_search is not None:
+            try:
+                self._keyword_search.remove_document(document_id)
+            except Exception as exc:
+                logger.warning(
+                    "document_ingestion_keyword_rollback_failed",
+                    extra={
+                        "operation": "rollback_ingestion",
+                        "document_id": document_id,
+                        "error_type": type(exc).__name__,
+                    },
+                )
+
+        logger.info(
+            "document_ingestion_rolled_back",
+            extra={
+                "operation": "rollback_ingestion",
+                "document_id": document_id,
+                "chunk_count": len(chunk_ids),
             },
         )
 
@@ -378,3 +520,12 @@ class DocumentIngestionService:
                 )
             )
         return records
+
+
+def _checksum_lock_for(checksum: str) -> threading.Lock:
+    with _checksum_locks_guard:
+        lock = _checksum_locks.get(checksum)
+        if lock is None:
+            lock = threading.Lock()
+            _checksum_locks[checksum] = lock
+        return lock

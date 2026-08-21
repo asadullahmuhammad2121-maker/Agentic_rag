@@ -60,6 +60,8 @@ class DocumentNavigationTool(Tool):
             page_number=payload.page_number,
             window=payload.window,
             limit=payload.limit,
+            reference_label=payload.reference_label,
+            direction=payload.direction,
         )
         output = DocumentNavigationOutput(
             document_id=result.document_id,

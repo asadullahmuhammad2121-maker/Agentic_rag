@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -229,8 +229,17 @@ class DocumentNavigationInput(BaseModel):
     page_number: int | None = Field(default=None, ge=1)
     window: int | None = Field(default=None, ge=0, le=5)
     limit: int | None = Field(default=None, gt=0, le=20)
+    reference_label: str | None = Field(
+        default=None,
+        max_length=256,
+        description="Section heading referenced by a continuation query",
+    )
+    direction: Literal["after", "before"] | None = Field(
+        default=None,
+        description="Whether to fetch the section after or before the reference section",
+    )
 
-    @field_validator("document_id", "chunk_id")
+    @field_validator("document_id", "chunk_id", "reference_label")
     @classmethod
     def strip_required_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -242,6 +251,12 @@ class DocumentNavigationInput(BaseModel):
     def require_navigation_anchor(self) -> DocumentNavigationInput:
         if self.chunk_id is None and self.chunk_index is None and self.page_number is None:
             msg = "At least one of chunk_id, chunk_index, or page_number is required"
+            raise ValueError(msg)
+        if (self.reference_label is None) ^ (self.direction is None):
+            msg = "reference_label and direction must be provided together"
+            raise ValueError(msg)
+        if self.reference_label is not None and self.chunk_id is None and self.chunk_index is None:
+            msg = "Section navigation requires chunk_id or chunk_index as the anchor"
             raise ValueError(msg)
         return self
 

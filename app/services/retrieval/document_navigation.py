@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from app.core.config import Settings
 from app.core.logging import get_logger
 from app.services.retrieval.chunk_mapping import payload_to_retrieved_chunk
 from app.services.retrieval.models import RetrievedChunk
+from app.services.retrieval.section_detection import (
+    adjacent_section,
+    build_sections,
+    find_section_for_reference,
+)
 from app.vector_store.base import VectorStore
+
+SectionDirection = Literal["after", "before"]
 
 logger = get_logger(__name__)
 
@@ -16,6 +24,8 @@ DEFAULT_WINDOW = 2
 DEFAULT_MAX_CHUNKS = 10
 MAX_WINDOW = 5
 MAX_LIMIT = 20
+MAX_DOCUMENT_SCAN_INDEX = 1000
+MAX_CONSECUTIVE_MISSES = 5
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +55,8 @@ class DocumentNavigationService:
         page_number: int | None = None,
         window: int | None = None,
         limit: int | None = None,
+        reference_label: str | None = None,
+        direction: SectionDirection | None = None,
     ) -> DocumentNavigationResult:
         normalized_document_id = document_id.strip()
         if not normalized_document_id:
@@ -57,6 +69,7 @@ class DocumentNavigationService:
 
         resolved_window = _clamp(window if window is not None else DEFAULT_WINDOW, 0, MAX_WINDOW)
         resolved_limit = _clamp(limit if limit is not None else DEFAULT_MAX_CHUNKS, 1, MAX_LIMIT)
+        normalized_reference = reference_label.strip() if reference_label else None
 
         if chunk_id is not None or chunk_index is not None:
             anchor = self._resolve_anchor(
@@ -81,18 +94,29 @@ class DocumentNavigationService:
                     chunks=[],
                 )
 
-            chunks = self._neighbor_chunks(
-                document_id=normalized_document_id,
-                anchor_index=anchor.chunk_index,
-                window=resolved_window,
-                limit=resolved_limit,
-            )
+            if normalized_reference and direction is not None:
+                chunks = self._adjacent_section_chunks(
+                    document_id=normalized_document_id,
+                    anchor=anchor,
+                    reference_label=normalized_reference,
+                    direction=direction,
+                    limit=resolved_limit,
+                )
+            else:
+                chunks = self._neighbor_chunks(
+                    document_id=normalized_document_id,
+                    anchor_index=anchor.chunk_index,
+                    window=resolved_window,
+                    limit=resolved_limit,
+                )
             logger.info(
                 "document_navigation_completed",
                 extra={
                     "operation": "document_navigation",
                     "document_id": normalized_document_id,
                     "anchor_chunk_index": anchor.chunk_index,
+                    "reference_label": normalized_reference,
+                    "direction": direction,
                     "result_count": len(chunks),
                 },
             )
@@ -181,6 +205,68 @@ class DocumentNavigationService:
                 chunks.append(chunk)
         chunks.sort(key=lambda item: item.chunk_index)
         return _limit_around_anchor(chunks, anchor_index=anchor_index, limit=limit)
+
+    def _adjacent_section_chunks(
+        self,
+        *,
+        document_id: str,
+        anchor: RetrievedChunk,
+        reference_label: str,
+        direction: SectionDirection,
+        limit: int,
+    ) -> list[RetrievedChunk]:
+        document_chunks = self._load_document_chunks(document_id)
+        if not document_chunks:
+            return []
+
+        sections = build_sections(
+            [(chunk.chunk_index, chunk.text) for chunk in document_chunks],
+        )
+        reference_section = find_section_for_reference(
+            sections,
+            anchor_index=anchor.chunk_index,
+            reference=reference_label,
+        )
+        if reference_section is None:
+            return []
+
+        target_section = adjacent_section(
+            sections,
+            reference_section=reference_section,
+            direction=direction,
+        )
+        if target_section is None:
+            return []
+
+        selected = [
+            chunk
+            for chunk in document_chunks
+            if target_section.start_index <= chunk.chunk_index <= target_section.end_index
+        ]
+        selected.sort(key=lambda item: item.chunk_index)
+        return selected[:limit]
+
+    def _load_document_chunks(self, document_id: str) -> list[RetrievedChunk]:
+        chunks: list[RetrievedChunk] = []
+        misses = 0
+        for index in range(MAX_DOCUMENT_SCAN_INDEX + 1):
+            hits = self._vector_store.find_by_payload(
+                self._collection,
+                {"document_id": document_id, "chunk_index": index},
+                limit=1,
+            )
+            if not hits:
+                if chunks:
+                    misses += 1
+                    if misses >= MAX_CONSECUTIVE_MISSES:
+                        break
+                continue
+
+            misses = 0
+            chunk = _to_chunk(hits[0].id, hits[0].payload, document_id=document_id)
+            if chunk is not None:
+                chunks.append(chunk)
+        return chunks
 
     def _page_chunks(
         self,

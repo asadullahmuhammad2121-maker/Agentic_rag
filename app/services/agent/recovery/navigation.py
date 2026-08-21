@@ -17,6 +17,13 @@ from app.services.agent.tools.document_navigation import DOCUMENT_NAVIGATION_TOO
 from app.services.agent.tools.rag import RAG_RETRIEVAL_TOOL_NAME
 from app.services.agent.tools.registry import ToolRegistry
 from app.services.rag.service import EMPTY_RETRIEVAL_ANSWER
+from app.services.retrieval.section_detection import (
+    build_sections,
+    extract_heading_label,
+    find_section_for_reference,
+    labels_match,
+    successor_heading_present,
+)
 
 _INSUFFICIENT_ANSWER_MARKERS: tuple[str, ...] = (
     "do not have enough information",
@@ -109,6 +116,10 @@ _REFERENCE_STARTING_FROM = re.compile(
     r"starting\s+from\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
     re.IGNORECASE,
 )
+_REFERENCE_FOLLOWS = re.compile(
+    r"follows\s+(?:the\s+)?(.+?)(?:\s+section)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
 
 _ADJACENT_NAVIGATION_WINDOW = 2
 
@@ -163,8 +174,12 @@ def maybe_document_navigation_recovery(
         arguments["page_number"] = anchor.page_number if anchor.page_number >= 1 else 1
         arguments["limit"] = _BROAD_NAVIGATION_LIMIT
     elif _query_needs_adjacent_navigation(query):
+        reference = _reference_label_from_query(query)
+        if reference is None:
+            return None
         arguments["chunk_id"] = anchor.chunk_id
-        arguments["window"] = _adjacent_window_for_query(query)
+        arguments["reference_label"] = reference
+        arguments["direction"] = _adjacent_direction_from_query(query)
     else:
         arguments["chunk_id"] = anchor.chunk_id
 
@@ -242,12 +257,11 @@ def retrieval_likely_incomplete_for_query(
         reference = _reference_label_from_query(query)
         if reference is not None:
             direction = _adjacent_direction_from_query(query)
-            if not _has_adjacent_chunk_in_context(
+            return not _has_adjacent_section_in_context(
                 retrieval.chunks,
                 reference=reference,
                 direction=direction,
-            ):
-                return True
+            )
         if list_items <= 1:
             return True
         if reference is not None:
@@ -385,6 +399,7 @@ def _reference_label_from_query(query: str) -> str | None:
         _REFERENCE_LABEL_BEFORE,
         _REFERENCE_AFTER,
         _REFERENCE_BEFORE,
+        _REFERENCE_FOLLOWS,
         _REFERENCE_STARTING_FROM,
     ):
         match = pattern.search(normalized)
@@ -494,7 +509,7 @@ def _chunk_matches_reference(text: str, reference: str) -> bool:
     return f"{reference_cf}:" in text_cf or reference_cf in text_cf
 
 
-def _has_adjacent_chunk_in_context(
+def _has_adjacent_section_in_context(
     chunks: Sequence[RetrievedChunkOutput],
     *,
     reference: str,
@@ -504,7 +519,57 @@ def _has_adjacent_chunk_in_context(
     if not matching:
         return False
 
+    combined = _combined_chunk_text(chunks)
+    if successor_heading_present(combined, reference, direction=direction):
+        return True
+
+    indexed = sorted(
+        ((chunk.chunk_index, chunk.text) for chunk in chunks),
+        key=lambda item: item[0],
+    )
+    sections = build_sections(indexed)
+    if not sections:
+        return False
+
     anchor_index = min(chunk.chunk_index for chunk in matching)
-    offset = -1 if direction == "before" else 1
-    target_index = anchor_index + offset
-    return any(chunk.chunk_index == target_index for chunk in chunks)
+    reference_section = find_section_for_reference(
+        sections,
+        anchor_index=anchor_index,
+        reference=reference,
+    )
+    if reference_section is None:
+        return False
+
+    section_positions = {
+        (section.start_index, section.end_index): index for index, section in enumerate(sections)
+    }
+    ref_position = section_positions.get(
+        (reference_section.start_index, reference_section.end_index),
+    )
+    if ref_position is None:
+        return False
+
+    if direction == "before":
+        if ref_position == 0:
+            return False
+        target = sections[ref_position - 1]
+    else:
+        if ref_position + 1 >= len(sections):
+            return False
+        target = sections[ref_position + 1]
+
+    if target.label is None:
+        return False
+
+    if direction == "after" and target.start_index > reference_section.end_index + 1:
+        return False
+    if direction == "before" and target.end_index < reference_section.start_index - 1:
+        return False
+
+    return any(
+        target.start_index <= chunk.chunk_index <= target.end_index for chunk in chunks
+    ) or any(
+        labels_match(extract_heading_label(chunk.text) or "", target.label)
+        for chunk in chunks
+        if extract_heading_label(chunk.text) is not None
+    )

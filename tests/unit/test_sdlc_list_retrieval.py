@@ -14,6 +14,8 @@ from app.services.agent.models import (
     RetrievedChunkOutput,
 )
 from app.services.agent.recovery.navigation import (
+    _reference_label_from_query,
+    _select_navigation_anchor,
     maybe_document_navigation_recovery,
     retrieval_likely_incomplete_for_query,
 )
@@ -71,6 +73,15 @@ PLANNING_PURPOSE_QUERY = (
 )
 REQUIREMENTS_QUERY = (
     "According to my uploaded SDLC document, what happens during Requirements Analysis?"
+)
+AFTER_PLANNING_QUERY = (
+    "According to my uploaded SDLC document, what stage comes immediately after the Planning stage?"
+)
+AFTER_REQUIREMENTS_QUERY = (
+    "According to my uploaded SDLC document, what comes immediately after Requirements Analysis?"
+)
+BEFORE_TESTING_QUERY = (
+    "According to my uploaded SDLC document, what stage comes before Testing?"
 )
 
 
@@ -185,6 +196,235 @@ def _complete_sdlc_list_chunk() -> RetrievedChunkOutput:
         chunking_strategy="recursive",
         score=0.95,
     )
+
+
+def _testing_chunk() -> RetrievedChunkOutput:
+    return RetrievedChunkOutput(
+        chunk_id=f"{SDLC_DOCUMENT_ID}:00006",
+        text=f"5\n{SDLC_STAGE_TEXT['Testing']}",
+        document_id=SDLC_DOCUMENT_ID,
+        filename=SDLC_FILENAME,
+        file_type="pdf",
+        source=SDLC_FILENAME,
+        page_number=1,
+        section=None,
+        chunk_index=6,
+        chunking_strategy="recursive",
+        score=0.90,
+    )
+
+
+def _design_chunk() -> RetrievedChunkOutput:
+    return RetrievedChunkOutput(
+        chunk_id=f"{SDLC_DOCUMENT_ID}:00004",
+        text=f"3\n{SDLC_STAGE_TEXT['Design']}",
+        document_id=SDLC_DOCUMENT_ID,
+        filename=SDLC_FILENAME,
+        file_type="pdf",
+        source=SDLC_FILENAME,
+        page_number=1,
+        section=None,
+        chunk_index=4,
+        chunking_strategy="recursive",
+        score=0.95,
+    )
+
+
+def _rag_chunks_missing_adjacent_successor() -> list[RetrievedChunkOutput]:
+    """Simulate production RAG: Planning present, successor stage absent, unrelated stage included."""
+    return [_planning_chunk(), _design_chunk(), _intro_chunk()]
+
+
+def test_reference_label_extracts_planning_from_after_query() -> None:
+    assert _reference_label_from_query(AFTER_PLANNING_QUERY) == "Planning"
+
+
+def test_reference_label_extracts_multi_word_stage_name() -> None:
+    assert _reference_label_from_query(AFTER_REQUIREMENTS_QUERY) == "Requirements Analysis"
+
+
+def test_reference_label_extracts_testing_from_before_query() -> None:
+    assert _reference_label_from_query(BEFORE_TESTING_QUERY) == "Testing"
+
+
+def test_after_planning_incomplete_when_successor_chunk_missing() -> None:
+    retrieval = RAGRetrievalOutput(
+        query="sdlc",
+        chunks=_rag_chunks_missing_adjacent_successor(),
+    )
+    assert retrieval_likely_incomplete_for_query(AFTER_PLANNING_QUERY, retrieval)
+
+
+def test_after_planning_recovery_anchors_planning_chunk() -> None:
+    retrieval = RAGRetrievalOutput(
+        query="sdlc",
+        chunks=_rag_chunks_missing_adjacent_successor(),
+    )
+    anchor = _select_navigation_anchor(AFTER_PLANNING_QUERY, retrieval.chunks)
+    assert anchor.chunk_index == 2
+    assert anchor.chunk_id == f"{SDLC_DOCUMENT_ID}:00002"
+
+
+def test_after_planning_recovery_uses_chunk_navigation_with_window() -> None:
+    retrieval = RAGRetrievalOutput(
+        query="sdlc",
+        chunks=_rag_chunks_missing_adjacent_successor(),
+    )
+    recovery = maybe_document_navigation_recovery(
+        [
+            AgentStep(
+                action=AgentAction(
+                    type=AgentActionType.CALL_TOOL,
+                    tool_name=RAG_RETRIEVAL_TOOL_NAME,
+                    tool_names=[RAG_RETRIEVAL_TOOL_NAME],
+                    arguments={"query": AFTER_PLANNING_QUERY},
+                ),
+                observation=AgentObservation(
+                    tool_name=RAG_RETRIEVAL_TOOL_NAME,
+                    success=True,
+                    tool_output=retrieval.model_dump(),
+                    answer="I do not have enough information in the provided context.",
+                    metadata={"generated": True},
+                ),
+            )
+        ],
+        query=AFTER_PLANNING_QUERY,
+        tools=ToolRegistry(
+            [
+                MagicMock(),
+                DocumentNavigationTool(
+                    DocumentNavigationService(make_settings(), MagicMock()),
+                ),
+            ]
+        ),
+    )
+    assert recovery is not None
+    assert recovery.arguments["chunk_id"] == f"{SDLC_DOCUMENT_ID}:00002"
+    assert recovery.arguments.get("window") == 2
+    assert "page_number" not in recovery.arguments
+
+
+def test_after_planning_merged_context_includes_requirements_chunk() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="I do not have enough information in the provided context.",
+            citations=[],
+        ),
+        RAGResult(
+            answer="Requirements Analysis follows Planning.",
+            citations=[],
+        ),
+    ]
+    service = _recovery_service(
+        rag_chunks=[
+            RetrievedChunk(
+                chunk_id=chunk.chunk_id,
+                text=chunk.text,
+                document_id=SDLC_DOCUMENT_ID,
+                filename=SDLC_FILENAME,
+                file_type="pdf",
+                source=SDLC_FILENAME,
+                page_number=1,
+                section=None,
+                chunk_index=chunk.chunk_index,
+                chunking_strategy="recursive",
+                score=chunk.score,
+            )
+            for chunk in _rag_chunks_missing_adjacent_successor()
+        ],
+        nav_records=_fragmented_sdlc_nav_records(),
+        generation=generation,
+    )
+
+    service.run(AFTER_PLANNING_QUERY)
+
+    merged = generation.generate_from_chunks.call_args_list[1].args[1]
+    merged_indices = {chunk.chunk_index for chunk in merged}
+    merged_text = "\n".join(chunk.text for chunk in merged)
+    assert 3 in merged_indices
+    assert "Requirements Analysis" in merged_text
+    assert SDLC_STAGE_TEXT["Requirements Analysis"] in merged_text
+
+
+def test_after_requirements_merged_context_includes_design_chunk() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="I do not have enough information in the provided context.",
+            citations=[],
+        ),
+        RAGResult(
+            answer="Design follows Requirements Analysis.",
+            citations=[],
+        ),
+    ]
+    service = _recovery_service(
+        rag_chunks=[
+            RetrievedChunk(
+                chunk_id=_requirements_chunk().chunk_id,
+                text=_requirements_chunk().text,
+                document_id=SDLC_DOCUMENT_ID,
+                filename=SDLC_FILENAME,
+                file_type="pdf",
+                source=SDLC_FILENAME,
+                page_number=1,
+                section=None,
+                chunk_index=3,
+                chunking_strategy="recursive",
+                score=0.91,
+            )
+        ],
+        nav_records=_fragmented_sdlc_nav_records(),
+        generation=generation,
+    )
+
+    service.run(AFTER_REQUIREMENTS_QUERY)
+
+    merged = generation.generate_from_chunks.call_args_list[1].args[1]
+    merged_indices = {chunk.chunk_index for chunk in merged}
+    assert 4 in merged_indices
+    assert SDLC_STAGE_TEXT["Design"] in "\n".join(chunk.text for chunk in merged)
+
+
+def test_before_testing_merged_context_includes_implementation_chunk() -> None:
+    generation = MagicMock()
+    generation.generate_from_chunks.side_effect = [
+        RAGResult(
+            answer="I do not have enough information in the provided context.",
+            citations=[],
+        ),
+        RAGResult(
+            answer="Implementation comes before Testing.",
+            citations=[],
+        ),
+    ]
+    service = _recovery_service(
+        rag_chunks=[
+            RetrievedChunk(
+                chunk_id=_testing_chunk().chunk_id,
+                text=_testing_chunk().text,
+                document_id=SDLC_DOCUMENT_ID,
+                filename=SDLC_FILENAME,
+                file_type="pdf",
+                source=SDLC_FILENAME,
+                page_number=1,
+                section=None,
+                chunk_index=6,
+                chunking_strategy="recursive",
+                score=0.90,
+            )
+        ],
+        nav_records=_fragmented_sdlc_nav_records(),
+        generation=generation,
+    )
+
+    service.run(BEFORE_TESTING_QUERY)
+
+    merged = generation.generate_from_chunks.call_args_list[1].args[1]
+    merged_indices = {chunk.chunk_index for chunk in merged}
+    assert 5 in merged_indices
+    assert SDLC_STAGE_TEXT["Implementation"] in "\n".join(chunk.text for chunk in merged)
 
 
 def test_seven_stages_query_detected_as_incomplete_with_intro_only() -> None:

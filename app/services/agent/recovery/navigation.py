@@ -72,6 +72,8 @@ _ENUMERATION_QUERY_MARKERS: tuple[str, ...] = (
 _CONTINUATION_QUERY_MARKERS: tuple[str, ...] = (
     " after ",
     " immediately after ",
+    " before ",
+    " immediately before ",
     " next stage",
     " next stages",
     " following stage",
@@ -80,7 +82,35 @@ _CONTINUATION_QUERY_MARKERS: tuple[str, ...] = (
     " subsequent stage",
     " subsequent stages",
     " comes after ",
+    " comes before ",
+    " prior to ",
+    " preceding ",
+    " follows ",
+    " follow ",
 )
+
+_REFERENCE_LABEL_AFTER = re.compile(
+    r"comes\s+(?:immediately\s+)?after\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_REFERENCE_LABEL_BEFORE = re.compile(
+    r"comes\s+(?:immediately\s+)?before\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_REFERENCE_AFTER = re.compile(
+    r"(?:immediately\s+)?after\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_REFERENCE_BEFORE = re.compile(
+    r"(?:immediately\s+)?before\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+_REFERENCE_STARTING_FROM = re.compile(
+    r"starting\s+from\s+(?:the\s+)?(.+?)(?:\s+stage)?\s*[?.!]?\s*$",
+    re.IGNORECASE,
+)
+
+_ADJACENT_NAVIGATION_WINDOW = 2
 
 _FIRST_ITEM_QUERY_MARKERS: tuple[str, ...] = (
     "first stage",
@@ -132,6 +162,9 @@ def maybe_document_navigation_recovery(
     if _query_needs_broad_navigation(query):
         arguments["page_number"] = anchor.page_number if anchor.page_number >= 1 else 1
         arguments["limit"] = _BROAD_NAVIGATION_LIMIT
+    elif _query_needs_adjacent_navigation(query):
+        arguments["chunk_id"] = anchor.chunk_id
+        arguments["window"] = _adjacent_window_for_query(query)
     else:
         arguments["chunk_id"] = anchor.chunk_id
 
@@ -206,10 +239,18 @@ def retrieval_likely_incomplete_for_query(
         return True
 
     if _query_expects_stage_continuation(query):
+        reference = _reference_label_from_query(query)
+        if reference is not None:
+            direction = _adjacent_direction_from_query(query)
+            if not _has_adjacent_chunk_in_context(
+                retrieval.chunks,
+                reference=reference,
+                direction=direction,
+            ):
+                return True
         if list_items <= 1:
             return True
-        anchor = _stage_anchor_from_query(query)
-        if anchor is not None:
+        if reference is not None:
             if _query_expects_immediate_successor(query) and list_items < 2:
                 return True
             if _query_expects_ordered_sequence(query) and list_items < 3:
@@ -278,6 +319,18 @@ def _query_expects_immediate_successor(query: str) -> bool:
         "immediately after" in normalized
         or "next stage" in normalized
         or " comes after " in normalized
+        or " follows " in normalized
+        or " follow " in normalized
+    )
+
+
+def _query_expects_immediate_predecessor(query: str) -> bool:
+    normalized = query.casefold()
+    return (
+        "immediately before" in normalized
+        or " comes before " in normalized
+        or " prior to " in normalized
+        or " preceding " in normalized
     )
 
 
@@ -294,6 +347,26 @@ def _query_needs_broad_navigation(query: str) -> bool:
     )
 
 
+def _query_needs_adjacent_navigation(query: str) -> bool:
+    return (
+        _query_expects_immediate_successor(query)
+        or _query_expects_immediate_predecessor(query)
+    )
+
+
+def _adjacent_window_for_query(query: str) -> int:
+    normalized = query.casefold()
+    if re.search(r"\b(?:two|2)\s+stages?\b", normalized):
+        return 3
+    return _ADJACENT_NAVIGATION_WINDOW
+
+
+def _adjacent_direction_from_query(query: str) -> str:
+    if _query_expects_immediate_predecessor(query):
+        return "before"
+    return "after"
+
+
 def _expected_stage_count(query: str) -> int | None:
     normalized = query.casefold()
     match = _STAGE_COUNT_PATTERN.search(normalized)
@@ -305,17 +378,35 @@ def _expected_stage_count(query: str) -> int | None:
     return _WORD_STAGE_COUNTS.get(token)
 
 
-def _stage_anchor_from_query(query: str) -> str | None:
-    normalized = query.casefold()
-    if " after " in normalized:
-        tail = normalized.split(" after ", 1)[1]
-        token = tail.split()[0].strip(".,?!")
-        return token or None
-    if "starting from " in normalized:
-        tail = normalized.split("starting from ", 1)[1]
-        token = tail.split()[0].strip(".,?!")
-        return token or None
+def _reference_label_from_query(query: str) -> str | None:
+    normalized = query.strip()
+    for pattern in (
+        _REFERENCE_LABEL_AFTER,
+        _REFERENCE_LABEL_BEFORE,
+        _REFERENCE_AFTER,
+        _REFERENCE_BEFORE,
+        _REFERENCE_STARTING_FROM,
+    ):
+        match = pattern.search(normalized)
+        if match is None:
+            continue
+        label = match.group(1).strip(" .?,!")
+        if label and label.casefold() not in {"the", "a", "an"}:
+            return _normalize_reference_label(label)
     return None
+
+
+def _normalize_reference_label(label: str) -> str:
+    lowered = label.casefold()
+    for separator in (" in the ", " in ", " of the ", " of "):
+        if separator in lowered:
+            index = lowered.index(separator)
+            return label[:index].strip()
+    return label.strip()
+
+
+def _stage_anchor_from_query(query: str) -> str | None:
+    return _reference_label_from_query(query)
 
 
 def _list_item_count_in_text(text: str) -> int:
@@ -359,6 +450,12 @@ def _select_navigation_anchor(
     if not candidates:
         return None
 
+    reference = _reference_label_from_query(query)
+    if reference is not None:
+        matched = _best_chunk_for_reference(candidates, reference)
+        if matched is not None:
+            return matched
+
     if _query_expects_first_item(query):
         return min(candidates, key=lambda chunk: chunk.chunk_index)
 
@@ -369,3 +466,45 @@ def _select_navigation_anchor(
         )
 
     return max(candidates, key=lambda chunk: chunk.score)
+
+
+def _best_chunk_for_reference(
+    chunks: Sequence[RetrievedChunkOutput],
+    reference: str,
+) -> RetrievedChunkOutput | None:
+    reference_cf = reference.casefold()
+
+    def rank(chunk: RetrievedChunkOutput) -> tuple[int, float, int]:
+        text_cf = chunk.text.casefold()
+        if f"{reference_cf}:" in text_cf:
+            return (3, chunk.score, -chunk.chunk_index)
+        if reference_cf in text_cf:
+            return (2, chunk.score, -chunk.chunk_index)
+        return (0, chunk.score, -chunk.chunk_index)
+
+    best = max(chunks, key=rank)
+    if rank(best)[0] > 0:
+        return best
+    return None
+
+
+def _chunk_matches_reference(text: str, reference: str) -> bool:
+    reference_cf = reference.casefold()
+    text_cf = text.casefold()
+    return f"{reference_cf}:" in text_cf or reference_cf in text_cf
+
+
+def _has_adjacent_chunk_in_context(
+    chunks: Sequence[RetrievedChunkOutput],
+    *,
+    reference: str,
+    direction: str,
+) -> bool:
+    matching = [chunk for chunk in chunks if _chunk_matches_reference(chunk.text, reference)]
+    if not matching:
+        return False
+
+    anchor_index = min(chunk.chunk_index for chunk in matching)
+    offset = -1 if direction == "before" else 1
+    target_index = anchor_index + offset
+    return any(chunk.chunk_index == target_index for chunk in chunks)

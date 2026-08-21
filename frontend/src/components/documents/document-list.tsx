@@ -8,7 +8,7 @@ import {
   Search,
   Trash2,
 } from "lucide-react";
-import type { StoredDocument } from "@/lib/types/documents";
+import type { DocumentSummary } from "@/lib/types/documents";
 import { formatDateTime, formatFileSize, formatFileType } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -18,12 +18,12 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { DeleteDocumentDialog } from "@/components/documents/delete-document-dialog";
 
 interface DocumentListProps {
-  documents: StoredDocument[] | undefined;
+  documents: DocumentSummary[] | undefined;
   isLoading: boolean;
   isError: boolean;
 }
 
-function statusBadge(status: StoredDocument["status"]) {
+function statusBadge(status: DocumentSummary["status"]) {
   if (status === "ingested") {
     return <Badge variant="success">Ingested</Badge>;
   }
@@ -33,7 +33,7 @@ function statusBadge(status: StoredDocument["status"]) {
 export function DocumentList({ documents, isLoading, isError }: DocumentListProps) {
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
-  const [deleteTarget, setDeleteTarget] = useState<StoredDocument | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DocumentSummary | null>(null);
 
   const fileTypes = useMemo(() => {
     if (!documents) return [];
@@ -74,7 +74,7 @@ export function DocumentList({ documents, isLoading, isError }: DocumentListProp
     return (
       <Card className="border-red-200 bg-red-50">
         <CardContent className="p-6 text-sm text-red-700">
-          Could not load the local document list.
+          Could not load documents from the backend. Check that the API is running and try again.
         </CardContent>
       </Card>
     );
@@ -88,8 +88,8 @@ export function DocumentList({ documents, isLoading, isError }: DocumentListProp
             <div>
               <CardTitle className="text-base">Documents</CardTitle>
               <CardDescription>
-                {documents?.length ?? 0} document{(documents?.length ?? 0) === 1 ? "" : "s"} uploaded
-                in this browser
+                {documents?.length ?? 0} document{(documents?.length ?? 0) === 1 ? "" : "s"} in the
+                knowledge base
               </CardDescription>
             </div>
           </div>
@@ -125,10 +125,10 @@ export function DocumentList({ documents, isLoading, isError }: DocumentListProp
           {!documents?.length ? (
             <div className="rounded-lg border border-dashed p-10 text-center">
               <FileText className="mx-auto mb-3 h-8 w-8 text-slate-300" />
-              <p className="font-medium text-slate-700">No documents yet</p>
+              <p className="font-medium text-slate-700">No documents uploaded</p>
               <p className="mt-1 text-sm text-slate-500">
-                Upload a file above to ingest it into the vector store. Documents appear here after
-                a successful upload.
+                Upload a file above to ingest it into the vector store. Documents appear here once
+                ingestion succeeds.
               </p>
             </div>
           ) : filtered.length === 0 ? (
@@ -164,8 +164,10 @@ export function DocumentList({ documents, isLoading, isError }: DocumentListProp
                         <dd className="inline">{doc.chunks_stored}</dd>
                       </div>
                       <div>
-                        <dt className="inline">Uploaded: </dt>
-                        <dd className="inline">{formatDateTime(doc.uploaded_at)}</dd>
+                        <dt className="inline">Ingested: </dt>
+                        <dd className="inline">
+                          {doc.ingested_at ? formatDateTime(doc.ingested_at) : "—"}
+                        </dd>
                       </div>
                     </dl>
                   </div>
@@ -181,7 +183,7 @@ export function DocumentList({ documents, isLoading, isError }: DocumentListProp
                       variant="ghost"
                       size="sm"
                       className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                      aria-label={`Remove ${doc.filename} from list`}
+                      aria-label={`Delete ${doc.filename}`}
                       onClick={() => setDeleteTarget(doc)}
                     >
                       <Trash2 className="h-4 w-4" />

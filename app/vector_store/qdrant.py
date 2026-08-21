@@ -371,6 +371,56 @@ class QdrantVectorStore(VectorStore):
                 details={"collection": collection_name},
             ) from exc
 
+    def scroll_payloads(
+        self,
+        collection_name: str,
+        *,
+        batch_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        if batch_size < 1:
+            return []
+
+        payloads: list[dict[str, Any]] = []
+        offset: Any | None = None
+        try:
+            while True:
+                points, offset = self._client.scroll(
+                    collection_name=collection_name,
+                    limit=batch_size,
+                    offset=offset,
+                    with_payload=True,
+                    with_vectors=False,
+                )
+                for point in points:
+                    if point.payload:
+                        payloads.append(dict(point.payload))
+                if offset is None:
+                    break
+            logger.debug(
+                "qdrant_payload_scroll_completed",
+                extra={
+                    "operation": "scroll_payloads",
+                    "collection": collection_name,
+                    "result_count": len(payloads),
+                },
+            )
+            return payloads
+        except UnexpectedResponse as exc:
+            raise VectorStoreError(
+                "Payload scroll failed",
+                details={"collection": collection_name},
+            ) from exc
+        except Exception as exc:
+            if _is_connection_error(exc):
+                raise QdrantConnectionError() from exc
+            message = str(exc).lower()
+            if "not found" in message or "doesn't exist" in message:
+                return []
+            raise VectorStoreError(
+                "Payload scroll failed",
+                details={"collection": collection_name},
+            ) from exc
+
     def find_by_payload(
         self,
         collection_name: str,

@@ -1,7 +1,7 @@
 "use client";
 
 import { Loader2 } from "lucide-react";
-import type { StoredDocument } from "@/lib/types/documents";
+import type { DocumentSummary } from "@/lib/types/documents";
 import { useDeleteDocument } from "@/lib/hooks/use-documents";
 import { Button } from "@/components/ui/button";
 import {
@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog";
 
 interface DeleteDocumentDialogProps {
-  document: StoredDocument | null;
+  document: DocumentSummary | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }

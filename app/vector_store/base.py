@@ -98,6 +98,15 @@ class VectorStore(ABC):
         """Count vectors whose payload matches exact key/value conditions."""
 
     @abstractmethod
+    def scroll_payloads(
+        self,
+        collection_name: str,
+        *,
+        batch_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        """Return all point payloads in a collection (vectors omitted)."""
+
+    @abstractmethod
     def find_by_payload(
         self,
         collection_name: str,

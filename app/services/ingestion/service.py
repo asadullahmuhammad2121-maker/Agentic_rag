@@ -72,6 +72,23 @@ class DeletedDocument:
     filename: str | None
 
 
+@dataclass(slots=True, frozen=True)
+class ListedDocument:
+    """Aggregated document metadata derived from stored vector payloads."""
+
+    document_id: str
+    filename: str
+    content_type: str
+    file_type: str
+    file_size: int
+    checksum: str
+    source: str
+    page_count: int
+    pages_stored: int
+    chunks_stored: int
+    ingested_at: str | None
+
+
 class DocumentIngestionService:
     """Validate, parse, chunk, embed, and persist uploaded documents."""
 
@@ -214,6 +231,47 @@ class DocumentIngestionService:
             chunks_deleted=chunk_count,
             checksum=str(checksum) if checksum is not None else None,
             filename=str(filename) if filename is not None else None,
+        )
+
+    def list_documents(self) -> list[ListedDocument]:
+        """Return unique ingested documents aggregated from vector-store payloads."""
+        collection = self._settings.qdrant_collection_name
+        payloads = self._vector_store.scroll_payloads(collection)
+        documents = _aggregate_listed_documents(payloads)
+        logger.info(
+            "document_list_completed",
+            extra={
+                "operation": "list_documents",
+                "document_count": len(documents),
+            },
+        )
+        return documents
+
+    def get_document(self, document_id: str) -> ListedDocument:
+        """Return aggregated metadata for a single ingested document."""
+        normalized_id = document_id.strip()
+        if not normalized_id:
+            raise InvalidDocumentError(
+                "Document ID must not be empty",
+                details={"reason": "empty_document_id"},
+            )
+
+        collection = self._settings.qdrant_collection_name
+        hits = self._vector_store.find_by_payload(
+            collection,
+            {"document_id": normalized_id},
+            limit=1,
+        )
+        if not hits:
+            raise DocumentNotFoundError(details={"document_id": normalized_id})
+
+        chunk_count = self._vector_store.count_by_payload(
+            collection,
+            {"document_id": normalized_id},
+        )
+        return _listed_document_from_payload(
+            hits[0].payload,
+            chunks_stored=chunk_count,
         )
 
     def _ingest_document_locked(
@@ -529,3 +587,65 @@ def _checksum_lock_for(checksum: str) -> threading.Lock:
             lock = threading.Lock()
             _checksum_locks[checksum] = lock
         return lock
+
+
+def _aggregate_listed_documents(payloads: list[dict[str, object]]) -> list[ListedDocument]:
+    template_by_id: dict[str, dict[str, object]] = {}
+    chunk_counts: dict[str, int] = {}
+    page_numbers: dict[str, set[int]] = {}
+
+    for payload in payloads:
+        document_id = str(payload.get("document_id", "")).strip()
+        if not document_id:
+            continue
+
+        chunk_counts[document_id] = chunk_counts.get(document_id, 0) + 1
+        page_number = payload.get("page_number")
+        if isinstance(page_number, int):
+            page_numbers.setdefault(document_id, set()).add(page_number)
+        template_by_id.setdefault(document_id, payload)
+
+    documents = [
+        _listed_document_from_payload(
+            template_by_id[document_id],
+            chunks_stored=chunk_counts[document_id],
+            pages_stored=len(page_numbers.get(document_id, set())),
+        )
+        for document_id in template_by_id
+    ]
+    return sorted(
+        documents,
+        key=lambda document: document.ingested_at or "",
+        reverse=True,
+    )
+
+
+def _listed_document_from_payload(
+    payload: dict[str, object],
+    *,
+    chunks_stored: int,
+    pages_stored: int | None = None,
+) -> ListedDocument:
+    document_id = str(payload.get("document_id", "")).strip()
+    page_count_raw = payload.get("page_count")
+    page_count = int(page_count_raw) if isinstance(page_count_raw, int) else 1
+    file_size_raw = payload.get("file_size")
+    file_size = int(file_size_raw) if isinstance(file_size_raw, int) else 0
+    resolved_pages_stored = (
+        page_count if pages_stored is None or pages_stored < 1 else pages_stored
+    )
+    ingested_at = payload.get("ingested_at")
+
+    return ListedDocument(
+        document_id=document_id,
+        filename=str(payload.get("filename", "")),
+        content_type=str(payload.get("content_type", "application/octet-stream")),
+        file_type=str(payload.get("file_type", "")),
+        file_size=file_size,
+        checksum=str(payload.get("checksum", "")),
+        source=str(payload.get("source", "")),
+        page_count=max(page_count, 1),
+        pages_stored=max(resolved_pages_stored, 1),
+        chunks_stored=max(chunks_stored, 1),
+        ingested_at=str(ingested_at) if ingested_at is not None else None,
+    )

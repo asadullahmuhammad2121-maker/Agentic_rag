@@ -14,8 +14,10 @@ from app.schemas.documents import (
     DocumentBatchIngestResponse,
     DocumentDeleteResponse,
     DocumentIngestResponse,
+    DocumentListResponse,
+    DocumentSummaryResponse,
 )
-from app.services.ingestion.service import DeletedDocument, IngestedDocument
+from app.services.ingestion.service import DeletedDocument, IngestedDocument, ListedDocument
 from app.utils.filenames import sanitize_upload_filename
 
 logger = get_logger(__name__)
@@ -72,6 +74,23 @@ def _to_delete_response(result: DeletedDocument) -> DocumentDeleteResponse:
         checksum=result.checksum,
         filename=result.filename,
         status="deleted",
+    )
+
+
+def _to_summary_response(result: ListedDocument) -> DocumentSummaryResponse:
+    return DocumentSummaryResponse(
+        document_id=result.document_id,
+        filename=result.filename,
+        content_type=result.content_type,
+        file_type=result.file_type,
+        file_size=result.file_size,
+        checksum=result.checksum,
+        source=result.source,
+        page_count=result.page_count,
+        pages_stored=result.pages_stored,
+        chunks_stored=result.chunks_stored,
+        ingested_at=result.ingested_at,
+        status="ingested",
     )
 
 
@@ -170,6 +189,37 @@ async def upload_document(
         total_documents=len(results),
         status="ingested",
     )
+
+
+@router.get(
+    "",
+    response_model=DocumentListResponse,
+    summary="List ingested documents",
+)
+async def list_documents(
+    ingestion_service: IngestionServiceDep,
+) -> DocumentListResponse:
+    """Return unique documents aggregated from vector-store chunk metadata."""
+    documents = ingestion_service.list_documents()
+    return DocumentListResponse(
+        documents=[_to_summary_response(document) for document in documents],
+        total_documents=len(documents),
+        status="ok",
+    )
+
+
+@router.get(
+    "/{document_id}",
+    response_model=DocumentSummaryResponse,
+    summary="Get ingested document metadata",
+)
+async def get_document(
+    document_id: str,
+    ingestion_service: IngestionServiceDep,
+) -> DocumentSummaryResponse:
+    """Return aggregated metadata for one ingested document."""
+    result = ingestion_service.get_document(document_id)
+    return _to_summary_response(result)
 
 
 @router.delete(

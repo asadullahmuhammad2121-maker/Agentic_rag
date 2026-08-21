@@ -16,9 +16,10 @@ export function DocumentsPageContent() {
       >
         <Info className="mt-0.5 h-4 w-4 shrink-0 text-slate-400" aria-hidden />
         <p>
-          Upload uses <code className="rounded bg-slate-100 px-1">POST /documents/upload</code>.
-          The backend does not yet expose list, detail, or delete endpoints — this page tracks
-          documents uploaded from this browser using the ingest response.
+          Documents are loaded from <code className="rounded bg-slate-100 px-1">GET /documents</code>
+          . Upload uses{" "}
+          <code className="rounded bg-slate-100 px-1">POST /documents/upload</code> and delete uses{" "}
+          <code className="rounded bg-slate-100 px-1">DELETE /documents/&#123;id&#125;</code>.
         </p>
       </div>
 

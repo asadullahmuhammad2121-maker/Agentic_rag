@@ -13,6 +13,18 @@ export interface DocumentIngestResponse {
   status: "ingested";
 }
 
+/** Matches `DocumentSummaryResponse` from the backend. */
+export interface DocumentSummary extends DocumentIngestResponse {
+  ingested_at: string | null;
+}
+
+/** Matches `DocumentListResponse` from the backend. */
+export interface DocumentListResponse {
+  documents: DocumentSummary[];
+  total_documents: number;
+  status: "ok";
+}
+
 /** Matches `DocumentBatchIngestItem` from the backend. */
 export type DocumentBatchIngestItem = DocumentIngestResponse;
 
@@ -24,11 +36,6 @@ export interface DocumentBatchIngestResponse {
 }
 
 export type DocumentUploadResponse = DocumentIngestResponse | DocumentBatchIngestResponse;
-
-/** Client-side record enriched with upload timestamp (not from API). */
-export interface StoredDocument extends DocumentIngestResponse {
-  uploaded_at: string;
-}
 
 export function isBatchUploadResponse(
   response: DocumentUploadResponse,

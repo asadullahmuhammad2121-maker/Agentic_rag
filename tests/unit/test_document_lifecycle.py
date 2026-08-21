@@ -109,6 +109,14 @@ class _InMemoryVectorStore(VectorStore):
     ) -> None:
         return None
 
+    def scroll_payloads(
+        self,
+        collection_name: str,
+        *,
+        batch_size: int = 100,
+    ) -> list[dict[str, Any]]:
+        return [dict(record.payload) for record in self.records.values()]
+
 
 def _matches_payload(payload: dict[str, Any], conditions: dict[str, Any]) -> bool:
     return all(payload.get(key) == value for key, value in conditions.items())
@@ -456,3 +464,114 @@ def test_delete_api_returns_deleted_payload() -> None:
     assert body["document_id"] == "doc-1"
     assert body["chunks_deleted"] == 3
     assert body["status"] == "deleted"
+
+
+def test_list_documents_returns_uploaded_documents(service: DocumentIngestionService) -> None:
+    content_a = build_pdf_bytes(["Document A"])
+    content_b = build_pdf_bytes(["Document B"])
+    first = service.ingest_document(
+        filename="a.pdf",
+        content=content_a,
+        content_type="application/pdf",
+    )
+    second = service.ingest_document(
+        filename="b.pdf",
+        content=content_b,
+        content_type="application/pdf",
+    )
+
+    documents = service.list_documents()
+    document_ids = {document.document_id for document in documents}
+
+    assert first.document_id in document_ids
+    assert second.document_id in document_ids
+    assert all(document.chunks_stored >= 1 for document in documents)
+    assert all(document.filename for document in documents)
+
+
+def test_list_documents_returns_unique_documents(service: DocumentIngestionService) -> None:
+    content = build_pdf_bytes(["Page one", "Page two"])
+    ingested = service.ingest_document(
+        filename="multi.pdf",
+        content=content,
+        content_type="application/pdf",
+    )
+
+    documents = service.list_documents()
+    matching = [document for document in documents if document.document_id == ingested.document_id]
+
+    assert len(matching) == 1
+    assert matching[0].chunks_stored >= 2
+
+
+def test_list_documents_empty_collection(
+    vector_store: _InMemoryVectorStore,
+    embedding_service: MagicMock,
+) -> None:
+    service = DocumentIngestionService(
+        make_settings(embedding_dimension=8, chunk_size=50, chunk_overlap=5),
+        vector_store,
+        embedding_service,
+    )
+    assert service.list_documents() == []
+
+
+def test_get_document_returns_metadata(service: DocumentIngestionService) -> None:
+    content = build_pdf_bytes(["Detail view"])
+    ingested = service.ingest_document(
+        filename="detail.pdf",
+        content=content,
+        content_type="application/pdf",
+    )
+
+    document = service.get_document(ingested.document_id)
+
+    assert document.document_id == ingested.document_id
+    assert document.filename == "detail.pdf"
+    assert document.checksum == ingested.checksum
+    assert document.chunks_stored >= 1
+
+
+def test_list_documents_api_returns_summaries(service: DocumentIngestionService) -> None:
+    content = build_pdf_bytes(["API list"])
+    ingested = service.ingest_document(
+        filename="api.pdf",
+        content=content,
+        content_type="application/pdf",
+    )
+
+    application = create_app()
+    application.dependency_overrides[get_ingestion_service] = lambda: service
+
+    with TestClient(application) as client:
+        response = client.get("/documents")
+
+    application.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "ok"
+    assert body["total_documents"] >= 1
+    assert any(item["document_id"] == ingested.document_id for item in body["documents"])
+    assert "text" not in body["documents"][0]
+
+
+def test_get_document_api_returns_summary(service: DocumentIngestionService) -> None:
+    content = build_pdf_bytes(["API detail"])
+    ingested = service.ingest_document(
+        filename="detail-api.pdf",
+        content=content,
+        content_type="application/pdf",
+    )
+
+    application = create_app()
+    application.dependency_overrides[get_ingestion_service] = lambda: service
+
+    with TestClient(application) as client:
+        response = client.get(f"/documents/{ingested.document_id}")
+
+    application.dependency_overrides.clear()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["document_id"] == ingested.document_id
+    assert body["filename"] == "detail-api.pdf"
+    assert body["status"] == "ingested"

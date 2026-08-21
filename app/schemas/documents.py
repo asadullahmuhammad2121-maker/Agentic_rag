@@ -53,3 +53,28 @@ class DocumentDeleteResponse(BaseModel):
     checksum: str | None = None
     filename: str | None = None
     status: Literal["deleted"] = "deleted"
+
+
+class DocumentSummaryResponse(BaseModel):
+    """Aggregated metadata for a single ingested document."""
+
+    document_id: str
+    filename: str
+    content_type: str
+    file_type: str
+    file_size: int = Field(ge=0)
+    checksum: str
+    source: str
+    page_count: int = Field(ge=1)
+    pages_stored: int = Field(ge=1)
+    chunks_stored: int = Field(ge=1)
+    ingested_at: str | None = None
+    status: Literal["ingested"] = "ingested"
+
+
+class DocumentListResponse(BaseModel):
+    """Response returned when listing ingested documents."""
+
+    documents: list[DocumentSummaryResponse]
+    total_documents: int = Field(ge=0)
+    status: Literal["ok"] = "ok"

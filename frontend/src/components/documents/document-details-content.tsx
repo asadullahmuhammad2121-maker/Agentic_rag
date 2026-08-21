@@ -50,9 +50,7 @@ export function DocumentDetailsContent({ documentId }: DocumentDetailsContentPro
         </Button>
         <Card className="border-red-200 bg-red-50">
           <CardContent className="p-6 text-sm text-red-700">
-            {error instanceof Error
-              ? error.message
-              : "This document was not found in your browser upload history."}
+            {error instanceof Error ? error.message : "This document was not found in the knowledge base."}
           </CardContent>
         </Card>
       </div>
@@ -81,7 +79,8 @@ export function DocumentDetailsContent({ documentId }: DocumentDetailsContentPro
             {document.filename}
           </CardTitle>
           <CardDescription>
-            Ingested {formatDateTime(document.uploaded_at)} · ID {document.document_id}
+            Ingested {document.ingested_at ? formatDateTime(document.ingested_at) : "—"} · ID{" "}
+            {document.document_id}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -94,7 +93,10 @@ export function DocumentDetailsContent({ documentId }: DocumentDetailsContentPro
             <MetadataItem label="File size" value={formatFileSize(document.file_size)} />
             <MetadataItem label="Checksum" value={document.checksum} />
             <MetadataItem label="Status" value={document.status} />
-            <MetadataItem label="Uploaded (local)" value={formatDateTime(document.uploaded_at)} />
+            <MetadataItem
+              label="Ingested at"
+              value={document.ingested_at ? formatDateTime(document.ingested_at) : "—"}
+            />
           </dl>
         </CardContent>
       </Card>
@@ -136,17 +138,15 @@ export function DocumentDetailsContent({ documentId }: DocumentDetailsContentPro
             Pages &amp; sections
           </CardTitle>
           <CardDescription>
-            Per-page and section breakdown is not returned by the upload API.
+            Aggregate counts from the document metadata API.
           </CardDescription>
         </CardHeader>
         <CardContent className="rounded-lg border border-dashed p-8 text-center text-sm text-slate-500">
           <Layers className="mx-auto mb-3 h-8 w-8 text-slate-300" />
           <p className="font-medium text-slate-700">Page-level detail unavailable</p>
           <p className="mt-1">
-            The ingest response includes aggregate counts ({document.page_count} pages,{" "}
-            {document.pages_stored} stored) but not individual page or section content. A{" "}
-            <code className="rounded bg-slate-100 px-1">GET /documents/&#123;id&#125;</code> endpoint
-            would be required to show structured page data.
+            The document API includes aggregate counts ({document.page_count} pages,{" "}
+            {document.pages_stored} stored) but not individual page or section content.
           </p>
         </CardContent>
       </Card>

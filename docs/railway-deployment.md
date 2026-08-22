@@ -1,6 +1,6 @@
 # Railway Deployment Guide
 
-Deploy the Agentic RAG stack on Railway as **four services** while preserving the architecture:
+Deploy the Agentic RAG stack on Railway as **four services** while preserving the architecture shown in [architecture.svg](architecture.svg):
 
 ```text
 Browser → Frontend (Next.js) → Gateway (nginx) → Backend (FastAPI) → Qdrant

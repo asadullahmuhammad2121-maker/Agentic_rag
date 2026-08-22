@@ -52,20 +52,69 @@ Basic RAG  →  Advanced RAG  →  Agentic RAG
 
 ## Architecture
 
+The canonical system diagram is **[docs/architecture.svg](docs/architecture.svg)** (embedded below). It reflects the current implementation only—dashed boxes are optional/config-gated, orange is the recovery path, and red marks features that are not implemented.
+
 ![Agentic RAG Architecture](docs/architecture.svg)
 
-Runtime topology:
+### System layers
+
+| Layer | Components |
+| --- | --- |
+| **1. Client / Frontend** | Browser, Next.js UI, API client (React Query), `/backend` rewrite proxy |
+| **2. Gateway / Infrastructure** | nginx gateway, Docker Compose, Railway (4 services) |
+| **3. FastAPI backend** | HTTP routes, dependency injection, settings, health probes |
+| **4. Document ingestion** | `DocumentIngestionService`, parsers, chunking, HF embeddings → Qdrant + BM25 |
+| **5. Advanced RAG** | Query transform, multi-query, hybrid retrieval (vector + BM25 RRF), context optimization, Groq generation |
+| **6. Agentic RAG** | `AgentService`, `FoundationAgent`, planner/router, recovery, `ToolRegistry`, generation |
+| **7. Storage** | Qdrant, BM25 JSON index (`keyword_index_data` volume), SQLite agent runs |
+| **8. External services** | Groq API, Hugging Face API, Tavily API (optional) |
+
+### Runtime topology
 
 ```text
 Browser → Next.js (:3000) → nginx gateway (:8080) → FastAPI (:8000) → Qdrant
                                               ↘ BM25 JSON index (shared volume)
-                                              ↘ SQLite agent runs (local/Railway ephemeral)
+                                              ↘ SQLite agent runs (local / Railway ephemeral)
 ```
 
-- Dashed components in the diagram are optional or config-gated.
-- External providers: **Groq** (LLM), **Hugging Face** (embeddings), **Tavily** (optional web search).
+Diagram legend: **Core** = always wired when enabled; **Optional** = config-gated; **Recovery** = `document_navigation` via heuristics (not QueryRouter); **N/A** = reranking (not implemented).
 
-Detailed Railway service layout: [docs/railway-deployment.md](docs/railway-deployment.md).
+External providers: **Groq** (LLM routing, planning, generation, query transform, multi-query), **Hugging Face** (embeddings), **Tavily** (optional web search).
+
+Railway service layout: [docs/railway-deployment.md](docs/railway-deployment.md).
+
+### End-to-end flows
+
+**Direct RAG** (`POST /query`):
+
+```text
+Query → [optional] query transformation → [optional] multi-query retrieval
+     → hybrid retrieval (Qdrant + BM25 RRF) or vector-only
+     → [optional] context optimization → PromptBuilder → GroqLLMService
+     → answer + citations
+```
+
+Reranking is skipped—not implemented.
+
+**Agent query** (`POST /agent/query`):
+
+```text
+AgentService → FoundationAgent → [QueryPlanner | QueryRouter]
+            → ToolRegistry (rag_retrieval, tavily_web_search, calculator)
+            → generation layer
+            → answer + citations (+ SQLite run record)
+```
+
+On step 2+, **navigation recovery** may call `document_navigation` (section-level chunk loading from Qdrant metadata) and merge results with prior RAG context before regeneration. `document_navigation` is not selected by `QueryRouter`.
+
+**Document ingestion** (`POST /documents/upload`):
+
+```text
+Upload → ParserRegistry → ChunkingService → HuggingFace embeddings
+      → Qdrant vectors + BM25 index update
+```
+
+Lifecycle: SHA-256 duplicate detection, list/get/delete, rollback on partial failure, re-upload via delete-then-upload.
 
 ### Application layout
 

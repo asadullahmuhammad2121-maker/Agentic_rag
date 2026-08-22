@@ -1,6 +1,19 @@
-# Agentic RAG Frontend (Phase 1)
+# Agentic RAG Frontend
 
-Next.js dashboard and agent chat UI for the FastAPI backend.
+Next.js dashboard and UI for the Agentic RAG FastAPI backend.
+
+## Features
+
+| Page | Backend integration |
+| --- | --- |
+| Dashboard | Health and system status |
+| Agent Chat | `POST /agent/query` |
+| Documents | Upload, list, detail, delete |
+| Retrieval | `POST /retrieval/explore` |
+| Agent Runs | `GET /agent/runs`, run detail |
+| Settings | `GET /settings` (read-only) |
+
+The app proxies API calls through `/backend/*` so the browser never needs direct CORS access to the backend.
 
 ## Setup
 
@@ -14,24 +27,26 @@ npm install
 
 | Variable | Description |
 | --- | --- |
-| `NEXT_PUBLIC_API_URL` | Browser-facing API base (default `/backend` via Next.js rewrite) |
-| `API_URL` | Server-side proxy target (default `http://localhost:8001`) |
+| `NEXT_PUBLIC_API_URL` | Browser API base path (default `/backend`) |
+| `API_URL` | Server-side rewrite target (default `http://localhost:8001`; Compose uses `http://gateway:80`) |
 
-The frontend proxies `/backend/*` to the FastAPI backend so CORS changes are not required.
+See [`next.config.ts`](next.config.ts) for the rewrite rule.
 
-## Run
+## Run (local dev)
 
 ```bash
-# Terminal 1 — backend
-cd ..
+# Terminal 1 — backend at repo root
 .venv/bin/python -m uvicorn app.main:app --reload --port 8001
 
 # Terminal 2 — frontend
-cd frontend
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000)
+Open [http://localhost:3000](http://localhost:3000).
+
+## Docker
+
+Built and served by the root `docker-compose.yml` `frontend` service on port `3000`. API traffic is rewritten to the gateway service.
 
 ## Scripts
 
@@ -43,9 +58,6 @@ npm run lint
 npm run typecheck
 ```
 
-## Phase 1 scope
+## Documentation
 
-- Application shell with responsive sidebar
-- Dashboard (real health data + clearly marked placeholders)
-- Agent Chat (`POST /agent/query`)
-- Placeholder nav pages: Documents, Retrieval, Agent Runs, Settings
+Project overview and deployment: [../README.md](../README.md).

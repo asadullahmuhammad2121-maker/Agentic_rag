@@ -80,7 +80,9 @@ Do **not** set `PORT` manually. Local Docker Compose continues to use `APP_PORT=
 
 ### Optional tuning
 
-`GROQ_MODEL`, `LLM_MAX_TOKENS`, `CHUNKING_STRATEGY`, `RETRIEVAL_TOP_K`, `LOG_LEVEL`, etc. — see `.env.example`.
+`GROQ_MODEL`, `LLM_MAX_TOKENS`, `CHUNKING_STRATEGY`, `RETRIEVAL_TOP_K`, `LOG_LEVEL`, `CALCULATOR_ENABLED`, `AGENT_PLANNING_ENABLED`, etc. — see `.env.example`.
+
+Set `GROQ_MODEL` to a model ID available on your Groq account (verify via the Groq models API before deploy).
 
 ---
 

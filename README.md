@@ -48,6 +48,14 @@ Query → routing / planning → ToolRegistry (RAG, Tavily) → generation → A
 
 ## Architecture
 
+![Agentic RAG Architecture](docs/architecture.svg)
+
+The diagram shows the full runtime stack: Next.js frontend, nginx gateway, FastAPI backend, document ingestion, Advanced RAG pipeline, Agentic RAG pipeline, shared storage (Qdrant, BM25 index, SQLite agent runs), and external providers (Groq, Hugging Face, Tavily). Dashed boxes are optional or config-gated; `document_navigation` is invoked via recovery heuristics, not the QueryRouter.
+
+For Railway deployment topology, see [docs/railway-deployment.md](docs/railway-deployment.md).
+
+### Application layout
+
 ```text
 app/
 ├── main.py                 # FastAPI entrypoint + lifespan

@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 2100" role="img" aria-labelledby="title desc">
+  <title id="title">Agentic RAG System Architecture</title>
+  <desc id="desc">Architecture diagram showing Frontend, Gateway, FastAPI backend, ingestion, Advanced RAG, Agentic RAG, storage, and external services.</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#475569"/></marker>
+    <marker id="arrow-blue" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#2563eb"/></marker>
+    <marker id="arrow-green" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#16a34a"/></marker>
+    <style>
+      .title{font:700 28px 'Segoe UI',system-ui,sans-serif;fill:#0f172a}
+      .subtitle{font:400 14px 'Segoe UI',system-ui,sans-serif;fill:#64748b}
+      .layer-label{font:700 13px 'Segoe UI',system-ui,sans-serif;fill:#fff;letter-spacing:.04em}
+      .box-title{font:700 13px 'Segoe UI',system-ui,sans-serif;fill:#0f172a}
+      .box-text{font:400 12px 'Segoe UI',system-ui,sans-serif;fill:#334155}
+      .small-text{font:400 11px 'Segoe UI',system-ui,sans-serif;fill:#475569}
+      .legend-text{font:400 12px 'Segoe UI',system-ui,sans-serif;fill:#334155}
+      .flow-label{font:600 11px 'Segoe UI',system-ui,sans-serif;fill:#64748b}
+      .not-impl{font:700 12px 'Segoe UI',system-ui,sans-serif;fill:#b91c1c}
+    </style>
+    <filter id="shadow" x="-2%" y="-2%" width="104%" height="104%"><feDropShadow dx="0" dy="1" stdDeviation="2" flood-color="#0f172a" flood-opacity="0.08"/></filter>
+  </defs>
+  <rect width="1400" height="2100" fill="#f8fafc"/>
+  <text x="700" y="42" text-anchor="middle" class="title">Agentic RAG - System Architecture</text>
+  <text x="700" y="68" text-anchor="middle" class="subtitle">Production stack: Next.js - nginx Gateway - FastAPI - Qdrant / BM25 / Groq</text>
+  <rect x="30" y="90" width="1340" height="130" rx="10" fill="#1e293b"/>
+  <text x="50" y="112" class="layer-label">1. CLIENT / FRONTEND - Next.js</text>
+  <g filter="url(#shadow)">
+    <rect x="60" y="130" width="150" height="70" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="135" y="158" text-anchor="middle" class="box-title">Browser</text><text x="135" y="178" text-anchor="middle" class="small-text">User</text>
+    <rect x="250" y="125" width="320" height="80" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="410" y="148" text-anchor="middle" class="box-title">Next.js App Router</text><text x="410" y="168" text-anchor="middle" class="small-text">Dashboard, Agent Chat, Documents</text><text x="410" y="186" text-anchor="middle" class="small-text">Retrieval, Agent Runs, Settings</text>
+    <rect x="610" y="130" width="280" height="70" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="750" y="158" text-anchor="middle" class="box-title">API Client</text><text x="750" y="178" text-anchor="middle" class="small-text">fetch /backend/*, React Query</text>
+    <rect x="930" y="130" width="400" height="70" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="1130" y="158" text-anchor="middle" class="box-title">Next.js Rewrite Proxy</text><text x="1130" y="178" text-anchor="middle" class="small-text">/backend/:path* to API_URL</text>
+  </g>
+  <line x1="210" y1="165" x2="250" y2="165" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="570" y1="165" x2="610" y2="165" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="890" y1="165" x2="930" y2="165" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="240" width="1340" height="120" rx="10" fill="#334155"/>
+  <text x="50" y="262" class="layer-label">2. GATEWAY / INFRASTRUCTURE</text>
+  <g filter="url(#shadow)">
+    <rect x="200" y="280" width="260" height="60" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="330" y="305" text-anchor="middle" class="box-title">nginx Gateway</text><text x="330" y="323" text-anchor="middle" class="small-text">:8080 local, Railway PORT</text>
+    <rect x="520" y="280" width="320" height="60" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="680" y="305" text-anchor="middle" class="box-title">Docker Compose</text><text x="680" y="323" text-anchor="middle" class="small-text">qdrant, app, gateway, frontend</text>
+    <rect x="900" y="280" width="320" height="60" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="1060" y="305" text-anchor="middle" class="box-title">Railway (4 services)</text><text x="1060" y="323" text-anchor="middle" class="small-text">Private networking, volumes</text>
+  </g>
+  <line x1="1130" y1="200" x2="1130" y2="230" stroke="#475569" stroke-width="2"/><line x1="1130" y1="230" x2="330" y2="230" stroke="#475569" stroke-width="2"/><line x1="330" y1="230" x2="330" y2="280" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="380" width="1340" height="100" rx="10" fill="#0f766e"/>
+  <text x="50" y="402" class="layer-label">3. FASTAPI BACKEND</text>
+  <g filter="url(#shadow)"><rect x="60" y="420" width="1280" height="45" rx="8" fill="#fff" stroke="#cbd5e1"/><text x="700" y="448" text-anchor="middle" class="box-text">Routes: /health /ready /live /documents/* /query /retrieval/explore /agent/* /settings</text></g>
+  <line x1="330" y1="340" x2="330" y2="365" stroke="#475569" stroke-width="2"/><line x1="330" y1="365" x2="700" y2="365" stroke="#475569" stroke-width="2"/><line x1="700" y1="365" x2="700" y2="420" stroke="#475569" stroke-width="2" marker-end="url(#arrow)"/>
+  <rect x="30" y="500" width="420" height="560" rx="10" fill="#ecfdf5" stroke="#86efac" stroke-width="1.5"/>
+  <text x="50" y="525" class="box-title" fill="#166534">4. DOCUMENT INGESTION</text><text x="50" y="545" class="small-text" fill="#166534">POST /documents/upload</text>
+  <g filter="url(#shadow)">
+    <rect x="55" y="565" width="370" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="240" y="592" text-anchor="middle" class="box-title">DocumentIngestionService</text>
+    <rect x="55" y="625" width="370" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="240" y="645" text-anchor="middle" class="box-title">ParserRegistry</text><text x="240" y="661" text-anchor="middle" class="small-text">pdf, docx, txt, md, csv, json</text>
+    <rect x="55" y="685" width="370" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="240" y="705" text-anchor="middle" class="box-title">ChunkingService</text><text x="240" y="721" text-anchor="middle" class="small-text">fixed, recursive, semantic, structure</text>
+    <rect x="55" y="745" width="370" height="44" rx="7" fill="#fff" stroke="#2563eb" stroke-width="1.5"/><text x="240" y="772" text-anchor="middle" class="box-title">HuggingFace Embeddings</text>
+    <rect x="55" y="810" width="175" height="50" rx="7" fill="#fff" stroke="#16a34a" stroke-width="1.5"/><text x="142" y="835" text-anchor="middle" class="box-title">Qdrant Vectors</text><text x="142" y="851" text-anchor="middle" class="small-text">metadata payloads</text>
+    <rect x="250" y="810" width="175" height="50" rx="7" fill="#fff" stroke="#16a34a" stroke-width="1.5"/><text x="337" y="835" text-anchor="middle" class="box-title">BM25 Index</text><text x="337" y="851" text-anchor="middle" class="small-text">JSON + file lock</text>
+    <rect x="55" y="880" width="370" height="70" rx="7" fill="#fff" stroke="#94a3b8"/><text x="240" y="905" text-anchor="middle" class="box-title">Document Lifecycle</text><text x="240" y="923" text-anchor="middle" class="small-text">SHA-256 duplicate detection, list, delete</text><text x="240" y="939" text-anchor="middle" class="small-text">rollback on failure, re-upload via delete</text>
+  </g>
+  <line x1="240" y1="609" x2="240" y2="625" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="240" y1="669" x2="240" y2="685" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="240" y1="729" x2="240" y2="745" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="240" y1="789" x2="240" y2="810" stroke="#475569" stroke-width="1.5"/><line x1="240" y1="810" x2="142" y2="810" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow-green)"/><line x1="240" y1="810" x2="337" y2="810" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="470" y="500" width="460" height="560" rx="10" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.5"/>
+  <text x="490" y="525" class="box-title" fill="#1d4ed8">5. ADVANCED RAG PIPELINE</text><text x="490" y="545" class="small-text" fill="#1d4ed8">POST /query, RAGService</text>
+  <g filter="url(#shadow)">
+    <rect x="495" y="565" width="410" height="40" rx="7" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="700" y="590" text-anchor="middle" class="box-title">Query Transformation (optional, Groq)</text>
+    <rect x="495" y="620" width="410" height="40" rx="7" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="700" y="645" text-anchor="middle" class="box-title">Multi-Query Retrieval (optional, Groq)</text>
+    <rect x="495" y="675" width="410" height="55" rx="7" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="700" y="698" text-anchor="middle" class="box-title">Hybrid Retrieval</text><text x="700" y="716" text-anchor="middle" class="small-text">Vector (Qdrant) + BM25, weighted RRF</text>
+    <rect x="495" y="745" width="195" height="40" rx="7" fill="#fff" stroke="#94a3b8"/><text x="592" y="770" text-anchor="middle" class="small-text">Vector Search</text>
+    <rect x="710" y="745" width="195" height="40" rx="7" fill="#fff" stroke="#94a3b8"/><text x="807" y="770" text-anchor="middle" class="small-text">BM25 Keyword</text>
+    <rect x="495" y="800" width="410" height="40" rx="7" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="700" y="825" text-anchor="middle" class="box-title">Context Optimization (optional)</text>
+    <rect x="495" y="855" width="195" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="592" y="882" text-anchor="middle" class="box-title">PromptBuilder</text>
+    <rect x="710" y="855" width="195" height="44" rx="7" fill="#fff" stroke="#2563eb" stroke-width="1.5"/><text x="807" y="882" text-anchor="middle" class="box-title">GroqLLMService</text>
+    <rect x="495" y="915" width="410" height="44" rx="7" fill="#fef2f2" stroke="#ef4444" stroke-width="2" stroke-dasharray="8 4"/><text x="700" y="942" text-anchor="middle" class="not-impl">Reranking - NOT IMPLEMENTED</text>
+    <rect x="495" y="975" width="410" height="36" rx="7" fill="#fff" stroke="#94a3b8"/><text x="700" y="998" text-anchor="middle" class="small-text">Answer + Citations</text>
+  </g>
+  <line x1="700" y1="605" x2="700" y2="620" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="700" y1="660" x2="700" y2="675" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="700" y1="730" x2="700" y2="745" stroke="#475569" stroke-width="1.5"/><line x1="650" y1="745" x2="592" y2="745" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="750" y1="745" x2="807" y2="745" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="700" y1="785" x2="700" y2="800" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="700" y1="840" x2="700" y2="855" stroke="#475569" stroke-width="1.5"/><line x1="690" y1="877" x2="710" y2="877" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow-blue)"/><line x1="700" y1="899" x2="700" y2="915" stroke="#ef4444" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="700" y1="959" x2="700" y2="975" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <text x="700" y="558" text-anchor="middle" class="flow-label">Query flow</text>
+  <rect x="950" y="500" width="420" height="560" rx="10" fill="#faf5ff" stroke="#c4b5fd" stroke-width="1.5"/>
+  <text x="970" y="525" class="box-title" fill="#6d28d9">6. AGENTIC RAG PIPELINE</text><text x="970" y="545" class="small-text" fill="#6d28d9">POST /agent/query</text>
+  <g filter="url(#shadow)">
+    <rect x="975" y="565" width="370" height="40" rx="7" fill="#fff" stroke="#94a3b8"/><text x="1160" y="590" text-anchor="middle" class="box-title">AgentService</text>
+    <rect x="975" y="620" width="370" height="40" rx="7" fill="#fff" stroke="#94a3b8"/><text x="1160" y="645" text-anchor="middle" class="box-title">FoundationAgent</text>
+    <rect x="975" y="675" width="175" height="44" rx="7" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="1062" y="695" text-anchor="middle" class="small-text">QueryPlanner</text><text x="1062" y="711" text-anchor="middle" class="small-text">optional, Groq</text>
+    <rect x="1170" y="675" width="175" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="1257" y="695" text-anchor="middle" class="small-text">QueryRouter</text><text x="1257" y="711" text-anchor="middle" class="small-text">Groq: rag, tavily, calc</text>
+    <rect x="975" y="735" width="370" height="50" rx="7" fill="#fff7ed" stroke="#f97316" stroke-width="2" stroke-dasharray="8 4"/><text x="1160" y="758" text-anchor="middle" class="box-title" fill="#c2410c">Navigation Recovery</text><text x="1160" y="776" text-anchor="middle" class="small-text" fill="#c2410c">heuristic, NOT via QueryRouter</text>
+    <rect x="975" y="800" width="370" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="1160" y="827" text-anchor="middle" class="box-title">ToolRegistry</text>
+    <rect x="975" y="860" width="175" height="36" rx="6" fill="#fff" stroke="#94a3b8"/><text x="1062" y="883" text-anchor="middle" class="small-text">rag_retrieval</text>
+    <rect x="1170" y="860" width="175" height="36" rx="6" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="1257" y="883" text-anchor="middle" class="small-text">tavily_web_search</text>
+    <rect x="975" y="908" width="175" height="36" rx="6" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="1062" y="931" text-anchor="middle" class="small-text">calculator</text>
+    <rect x="1170" y="908" width="175" height="36" rx="6" fill="#fff7ed" stroke="#f97316" stroke-width="1.5" stroke-dasharray="6 4"/><text x="1257" y="931" text-anchor="middle" class="small-text">document_navigation</text>
+    <rect x="975" y="960" width="370" height="44" rx="7" fill="#fff" stroke="#94a3b8"/><text x="1160" y="978" text-anchor="middle" class="box-title">Generation Layer</text><text x="1160" y="996" text-anchor="middle" class="small-text">RAG, Web, Calculator, Combined, Recovery merge</text>
+  </g>
+  <line x1="1160" y1="605" x2="1160" y2="620" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="1160" y1="660" x2="1160" y2="675" stroke="#475569" stroke-width="1.5"/><line x1="1100" y1="675" x2="1062" y2="675" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="1220" y1="675" x2="1257" y2="675" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="1160" y1="719" x2="1160" y2="735" stroke="#f97316" stroke-width="2" stroke-dasharray="5 3" marker-end="url(#arrow)"/><line x1="1160" y1="785" x2="1160" y2="800" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/><line x1="1160" y1="844" x2="1160" y2="860" stroke="#475569" stroke-width="1.5"/><line x1="1160" y1="944" x2="1160" y2="960" stroke="#475569" stroke-width="1.5" marker-end="url(#arrow)"/>
+  <path d="M 425 835 L 455 835 L 455 765 L 495 765" fill="none" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <path d="M 425 835 L 455 835 L 455 785 L 495 785" fill="none" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <path d="M 905 877 L 935 877 L 935 590 L 975 590" fill="none" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <path d="M 1062 896 L 1040 896 L 1040 520 L 700 520 L 700 565" fill="none" stroke="#6d28d9" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <path d="M 1257 944 L 1285 944 L 1285 520 L 850 520 L 850 590" fill="none" stroke="#f97316" stroke-width="1.5" stroke-dasharray="5 3" marker-end="url(#arrow)"/>
+  <rect x="30" y="1080" width="1340" height="120" rx="10" fill="#14532d"/>
+  <text x="50" y="1102" class="layer-label">7. STORAGE - Local / Shared</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="1120" width="340" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="2"/><text x="290" y="1148" text-anchor="middle" class="box-title">Qdrant</text><text x="290" y="1166" text-anchor="middle" class="small-text">Vector store, payloads, navigation scroll</text>
+    <rect x="530" y="1120" width="340" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="2"/><text x="700" y="1148" text-anchor="middle" class="box-title">BM25 JSON Index</text><text x="700" y="1166" text-anchor="middle" class="small-text">keyword_index/index.json, file lock</text>
+    <rect x="940" y="1120" width="340" height="60" rx="8" fill="#fff" stroke="#16a34a" stroke-width="2"/><text x="1110" y="1148" text-anchor="middle" class="box-title">SQLite AgentRunStore</text><text x="1110" y="1166" text-anchor="middle" class="small-text">data/agent_runs.db</text>
+  </g>
+  <line x1="142" y1="860" x2="142" y2="1060" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="142" y1="1060" x2="290" y2="1060" stroke="#16a34a" stroke-width="1.5"/><line x1="290" y1="1060" x2="290" y2="1120" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="337" y1="860" x2="337" y2="1070" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="337" y1="1070" x2="700" y2="1070" stroke="#16a34a" stroke-width="1.5"/><line x1="700" y1="1070" x2="700" y2="1120" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <line x1="1160" y1="1004" x2="1160" y2="1060" stroke="#16a34a" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="1160" y1="1060" x2="1110" y2="1060" stroke="#16a34a" stroke-width="1.5"/><line x1="1110" y1="1060" x2="1110" y2="1120" stroke="#16a34a" stroke-width="1.5" marker-end="url(#arrow-green)"/>
+  <rect x="30" y="1220" width="1340" height="120" rx="10" fill="#1e40af"/>
+  <text x="50" y="1242" class="layer-label">8. EXTERNAL SERVICES</text>
+  <g filter="url(#shadow)">
+    <rect x="120" y="1260" width="340" height="60" rx="8" fill="#fff" stroke="#2563eb" stroke-width="2"/><text x="290" y="1288" text-anchor="middle" class="box-title">Groq API</text><text x="290" y="1306" text-anchor="middle" class="small-text">Generation, routing, planning, transform</text>
+    <rect x="530" y="1260" width="340" height="60" rx="8" fill="#fff" stroke="#2563eb" stroke-width="2"/><text x="700" y="1288" text-anchor="middle" class="box-title">Hugging Face API</text><text x="700" y="1306" text-anchor="middle" class="small-text">Embeddings</text>
+    <rect x="940" y="1260" width="340" height="60" rx="8" fill="#fff" stroke="#2563eb" stroke-width="2"/><text x="1110" y="1288" text-anchor="middle" class="box-title">Tavily API</text><text x="1110" y="1306" text-anchor="middle" class="small-text">Web search (optional tool)</text>
+  </g>
+  <line x1="807" y1="899" x2="807" y2="1200" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="807" y1="1200" x2="290" y2="1200" stroke="#2563eb" stroke-width="1.5"/><line x1="290" y1="1200" x2="290" y2="1260" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="240" y1="789" x2="240" y2="1190" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="240" y1="1190" x2="700" y2="1190" stroke="#2563eb" stroke-width="1.5"/><line x1="700" y1="1190" x2="700" y2="1260" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <line x1="1257" y1="896" x2="1290" y2="896" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="1290" y1="896" x2="1290" y2="1195" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4 3"/><line x1="1290" y1="1195" x2="1110" y2="1195" stroke="#2563eb" stroke-width="1.5"/><line x1="1110" y1="1195" x2="1110" y2="1260" stroke="#2563eb" stroke-width="1.5" marker-end="url(#arrow-blue)"/>
+  <rect x="30" y="1360" width="1340" height="130" rx="10" fill="#fff" stroke="#cbd5e1" filter="url(#shadow)"/>
+  <text x="50" y="1388" class="box-title">Legend</text>
+  <rect x="60" y="1405" width="36" height="22" rx="4" fill="#fff" stroke="#94a3b8"/><text x="110" y="1421" class="legend-text">Core component</text>
+  <rect x="60" y="1435" width="36" height="22" rx="4" fill="#fff" stroke="#94a3b8" stroke-dasharray="6 4"/><text x="110" y="1451" class="legend-text">Optional / config-gated</text>
+  <rect x="700" y="1405" width="36" height="22" rx="4" fill="#fff7ed" stroke="#f97316" stroke-width="2" stroke-dasharray="6 4"/><text x="750" y="1421" class="legend-text">Recovery path (document_navigation)</text>
+  <rect x="700" y="1435" width="36" height="22" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="2" stroke-dasharray="8 4"/><text x="750" y="1451" class="legend-text">Not implemented (reranking)</text>
+  <rect x="30" y="1510" width="1340" height="560" rx="10" fill="#fff" stroke="#cbd5e1" filter="url(#shadow)"/>
+  <text x="50" y="1540" class="box-title">Key Data Flows</text>
+  <text x="60" y="1575" class="box-title">Direct RAG (POST /query)</text>
+  <text x="60" y="1598" class="box-text">Query - Query Transformation - Multi-Query - Hybrid (Qdrant + BM25 RRF) - Context Optimization - PromptBuilder - GroqLLMService - Answer + Citations</text>
+  <text x="60" y="1640" class="box-title">Agent (POST /agent/query)</text>
+  <text x="60" y="1663" class="box-text">AgentService - FoundationAgent - [QueryPlanner | QueryRouter] - ToolRegistry - tool execution - Generation - Answer + Citations</text>
+  <text x="60" y="1686" class="small-text">Step 2+: Navigation Recovery may invoke document_navigation and merge with prior RAG context.</text>
+  <text x="60" y="1728" class="box-title">Document Ingestion (POST /documents/upload)</text>
+  <text x="60" y="1751" class="box-text">Upload - ParserRegistry - ChunkingService - HuggingFace Embeddings - Qdrant + BM25 index</text>
+  <text x="60" y="1793" class="box-title">Deployment</text>
+  <text x="60" y="1816" class="box-text">Local: Browser - localhost:3000 (frontend) - localhost:8080 (gateway) - app:8000 - qdrant:6333</text>
+  <text x="60" y="1839" class="box-text">Railway: public frontend - private gateway - private backend - private Qdrant</text>
+  <text x="700" y="2085" text-anchor="middle" class="small-text">Agentic RAG architecture - dashed = optional or recovery - red = not implemented</text>
+</svg>
